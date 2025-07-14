@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teste de API</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+        }
+
+        .result {
+            background: #f5f5f5;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+
+        .error {
+            background: #ffe6e6;
+            color: #cc0000;
+        }
+
+        .success {
+            background: #e6ffe6;
+            color: #006600;
+        }
+
+        input {
+            padding: 10px;
+            width: 300px;
+            margin: 10px;
+        }
+
+        button {
+            padding: 10px 20px;
+            margin: 10px;
+        }
+
+        .spots-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .spot-card {
+            border: 1px solid #ddd;
+            padding: 15px;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Teste de API - Pontos Turísticos</h1>
+
+    <div>
+        <h2>Teste de Carregamento</h2>
+        <button onclick="testLoadSpots()">Carregar Pontos Turísticos</button>
+        <div id="load-result" class="result"></div>
+    </div>
+
+    <div>
+        <h2>Teste de Busca</h2>
+        <input type="text" id="search-input" placeholder="Digite para buscar..." />
+        <button onclick="testSearch()">Buscar</button>
+        <div id="search-result" class="result"></div>
+    </div>
+
+    <div>
+        <h2>Resultados</h2>
+        <div id="spots-display" class="spots-grid"></div>
+    </div>
+
+    <script>
+        let allSpots = [];
+
+        async function testLoadSpots() {
+            const resultDiv = document.getElementById('load-result');
+            resultDiv.innerHTML = 'Carregando...';
+
+            try {
+                console.log('Testando carregamento de pontos turísticos...');
+                const response = await fetch('/api/tourist-spots');
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const spots = await response.json();
+                allSpots = spots;
+
+                resultDiv.className = 'result success';
+                resultDiv.innerHTML = `✅ Sucesso! Carregados ${spots.length} pontos turísticos.`;
+
+                displaySpots(spots);
+
+                console.log('Pontos carregados:', spots);
+
+            } catch (error) {
+                console.error('Erro ao carregar pontos:', error);
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `❌ Erro: ${error.message}`;
+            }
+        }
+
+        function testSearch() {
+            const searchTerm = document.getElementById('search-input').value.toLowerCase();
+            const resultDiv = document.getElementById('search-result');
+
+            if (!allSpots.length) {
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = '❌ Primeiro carregue os pontos turísticos!';
+                return;
+            }
+
+            if (!searchTerm.trim()) {
+                resultDiv.className = 'result';
+                resultDiv.innerHTML = 'Mostrando todos os pontos...';
+                displaySpots(allSpots);
+                return;
+            }
+
+            console.log('Buscando por:', searchTerm);
+
+            const filteredSpots = allSpots.filter(spot => {
+                return spot.nome.toLowerCase().includes(searchTerm) ||
+                    (spot.descricao && spot.descricao.toLowerCase().includes(searchTerm));
+            });
+
+            resultDiv.className = 'result success';
+            resultDiv.innerHTML = `🔍 Encontrados ${filteredSpots.length} resultados para "${searchTerm}"`;
+
+            displaySpots(filteredSpots);
+
+            console.log('Resultados:', filteredSpots);
+        }
+
+        function displaySpots(spots) {
+            const container = document.getElementById('spots-display');
+
+            if (!spots.length) {
+                container.innerHTML = '<p>Nenhum ponto encontrado.</p>';
+                return;
+            }
+
+            container.innerHTML = spots.map(spot => `
+                <div class="spot-card">
+                    <h3>${spot.nome}</h3>
+                    <p><strong>ID:</strong> ${spot.id}</p>
+                    ${spot.descricao ? `<p><strong>Descrição:</strong> ${spot.descricao}</p>` : ''}
+                    ${spot.localizacao ? `<p><strong>Localização:</strong> ${spot.localizacao.latitude}, ${spot.localizacao.longitude}</p>` : ''}
+                </div>
+            `).join('');
+        }
+
+        // Auto-carregar ao abrir a página
+        document.addEventListener('DOMContentLoaded', testLoadSpots);
+
+        // Buscar automaticamente ao digitar
+        document.getElementById('search-input').addEventListener('input', function () {
+            setTimeout(testSearch, 300);
+        });
+    </script>
+</body>
+
+</html>

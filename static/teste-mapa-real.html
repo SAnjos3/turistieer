@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teste Mapa Real - Sistema de Rotas Turísticas</title>
+
+    <!-- Leaflet CSS for real maps -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .map-container {
+            height: 500px;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+
+        .info-panel {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+
+        .btn:hover {
+            background: #0056b3;
+        }
+
+        .route-info {
+            margin-top: 20px;
+            padding: 15px;
+            background: #e7f3ff;
+            border-radius: 8px;
+            border-left: 4px solid #007bff;
+        }
+
+        .point-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .point-list li {
+            padding: 8px;
+            margin: 5px 0;
+            background: white;
+            border-radius: 5px;
+            border-left: 3px solid #28a745;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🗺️ Teste de Mapa Real com Rotas Turísticas</h1>
+
+        <div class="info-panel">
+            <h3>📍 Demonstração de Rota Real</h3>
+            <p>Este mapa utiliza dados reais do OpenStreetMap e calcula rotas verdadeiras usando a API OSRM.</p>
+            <p><strong>Características:</strong></p>
+            <ul>
+                <li>✅ Mapas interativos reais</li>
+                <li>✅ Rotas calculadas com distâncias e tempos precisos</li>
+                <li>✅ Instruções passo-a-passo de direção</li>
+                <li>✅ Coordenadas GPS exatas</li>
+            </ul>
+        </div>
+
+        <div class="map-container" id="real-map">
+            <div style="display: flex; align-items: center; justify-content: center; height: 100%; color: #666;">
+                <i class="fas fa-spinner fa-spin" style="margin-right: 10px;"></i>
+                Carregando mapa real...
+            </div>
+        </div>
+
+        <div class="info-panel">
+            <h4>🎯 Pontos de Teste (Brasília, DF)</h4>
+            <ul class="point-list">
+                <li><strong>1. Congresso Nacional</strong> - Lat: -15.7998, Lng: -47.8645</li>
+                <li><strong>2. Torre de TV</strong> - Lat: -15.7906, Lng: -47.8914</li>
+                <li><strong>3. Catedral de Brasília</strong> - Lat: -15.7942, Lng: -47.8755</li>
+                <li><strong>4. Memorial JK</strong> - Lat: -15.7870, Lng: -47.9037</li>
+            </ul>
+        </div>
+
+        <div>
+            <button class="btn" onclick="testRealRoute()">🧪 Testar Rota Real</button>
+            <button class="btn" onclick="testAPIConnection()">🔗 Testar API</button>
+            <button class="btn" onclick="clearMap()">🗑️ Limpar Mapa</button>
+        </div>
+
+        <div id="route-info" class="route-info" style="display: none;">
+            <h4>📊 Informações da Rota</h4>
+            <div id="route-details"></div>
+        </div>
+    </div>
+
+    <!-- FontAwesome for icons -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+
+    <!-- Leaflet JavaScript for real maps -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+    <script>
+        let map = null;
+        let routeLayer = null;
+
+        // Pontos de teste em Brasília
+        const testPoints = [
+            {
+                id: 1,
+                nome: "Congresso Nacional",
+                localizacao: { latitude: -15.7998, longitude: -47.8645 },
+                descricao: "Sede do Poder Legislativo brasileiro"
+            },
+            {
+                id: 2,
+                nome: "Torre de TV",
+                localizacao: { latitude: -15.7906, longitude: -47.8914 },
+                descricao: "Torre de televisão e mirante"
+            },
+            {
+                id: 3,
+                nome: "Catedral de Brasília",
+                localizacao: { latitude: -15.7942, longitude: -47.8755 },
+                descricao: "Catedral Metropolitana Nossa Senhora Aparecida"
+            },
+            {
+                id: 4,
+                nome: "Memorial JK",
+                localizacao: { latitude: -15.7870, longitude: -47.9037 },
+                descricao: "Memorial Juscelino Kubitschek"
+            }
+        ];
+
+        // Inicializar mapa
+        function initMap() {
+            const mapContainer = document.getElementById('real-map');
+            mapContainer.innerHTML = '';
+
+            // Criar mapa centrado em Brasília
+            map = L.map('real-map').setView([-15.7942, -47.8755], 13);
+
+            // Adicionar camada de tiles
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 18
+            }).addTo(map);
+
+            // Adicionar marcadores para pontos de teste
+            testPoints.forEach((point, index) => {
+                const marker = L.marker([
+                    point.localizacao.latitude,
+                    point.localizacao.longitude
+                ]).addTo(map);
+
+                marker.bindPopup(`
+                    <div>
+                        <h4>${point.nome}</h4>
+                        <p>${point.descricao}</p>
+                        <p><strong>Posição:</strong> ${index + 1}º ponto</p>
+                        <p><strong>Coords:</strong> ${point.localizacao.latitude.toFixed(6)}, ${point.localizacao.longitude.toFixed(6)}</p>
+                    </div>
+                `);
+            });
+
+            console.log('Mapa real inicializado!');
+        }
+
+        // Testar rota real
+        async function testRealRoute() {
+            if (!map) {
+                alert('Inicialize o mapa primeiro');
+                return;
+            }
+
+            try {
+                console.log('Testando rota real...');
+                document.getElementById('route-info').style.display = 'block';
+                document.getElementById('route-details').innerHTML = '⏳ Calculando rota real...';
+
+                const response = await fetch('/api/calculate-real-route', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ points: testPoints })
+                });
+
+                if (response.ok) {
+                    const routeData = await response.json();
+                    console.log('Rota real calculada:', routeData);
+
+                    // Mostrar informações da rota
+                    document.getElementById('route-details').innerHTML = `
+                        <p><strong>🛣️ Distância Total:</strong> ${routeData.total_distance} km</p>
+                        <p><strong>⏱️ Tempo Estimado:</strong> ${Math.floor(routeData.estimated_time / 60)}h ${routeData.estimated_time % 60}min</p>
+                        <p><strong>📡 Fonte:</strong> ${routeData.source}</p>
+                        <p><strong>🧭 Tipo:</strong> ${routeData.type === 'real' ? 'Rota Real (GPS)' : 'Rota Aproximada'}</p>
+                        <p><strong>📍 Pontos:</strong> ${routeData.optimized_points?.length || 0}</p>
+                    `;
+
+                    // Adicionar rota no mapa
+                    if (routeData.geometry && routeData.type === 'real') {
+                        // Remover rota anterior
+                        if (routeLayer) {
+                            map.removeLayer(routeLayer);
+                        }
+
+                        // Adicionar nova rota
+                        routeLayer = L.geoJSON(routeData.geometry, {
+                            style: {
+                                color: '#ff0000',
+                                weight: 4,
+                                opacity: 0.8
+                            }
+                        }).addTo(map);
+
+                        routeLayer.bindPopup(`
+                            <div>
+                                <h4>🛣️ Rota Calculada</h4>
+                                <p>Distância: ${routeData.total_distance} km</p>
+                                <p>Tempo: ${Math.floor(routeData.estimated_time / 60)}h ${routeData.estimated_time % 60}min</p>
+                            </div>
+                        `);
+
+                        // Ajustar zoom para mostrar a rota
+                        map.fitBounds(routeLayer.getBounds());
+                    }
+
+                } else {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+            } catch (error) {
+                console.error('Erro ao testar rota:', error);
+                document.getElementById('route-details').innerHTML = `
+                    <p style="color: red;">❌ Erro ao calcular rota: ${error.message}</p>
+                    <p>Isso pode indicar que o servidor não está respondendo ou a API OSRM está indisponível.</p>
+                `;
+            }
+        }
+
+        // Testar conexão com API
+        async function testAPIConnection() {
+            try {
+                const response = await fetch('/api/tourist-spots');
+                if (response.ok) {
+                    alert('✅ API funcionando! Conexão estabelecida.');
+                } else {
+                    alert('❌ API não está respondendo corretamente.');
+                }
+            } catch (error) {
+                alert('❌ Erro de conexão: ' + error.message);
+            }
+        }
+
+        // Limpar mapa
+        function clearMap() {
+            if (routeLayer && map) {
+                map.removeLayer(routeLayer);
+                routeLayer = null;
+            }
+            document.getElementById('route-info').style.display = 'none';
+        }
+
+        // Inicializar quando a página carregar
+        document.addEventListener('DOMContentLoaded', function () {
+            console.log('Inicializando página de teste...');
+            setTimeout(initMap, 500);
+        });
+    </script>
+</body>
+
+</html>

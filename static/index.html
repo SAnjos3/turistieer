@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Rotas Turísticas</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- Leaflet CSS for real maps -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" 
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    
+    <!-- Leaflet Routing Machine for route calculation -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css" />
+</head>
+
+<body>
+    <div id="root">
+        <header class="header">
+            <div class="container">
+                <h1><i class="fas fa-map-marked-alt"></i> Sistema de Rotas Turísticas</h1>
+                <nav>
+                    <button id="btn-routes" class="nav-btn active">
+                        <i class="fas fa-route"></i> Rotas
+                    </button>
+                    <button id="btn-spots" class="nav-btn">
+                        <i class="fas fa-map-marker-alt"></i> Pontos Turísticos
+                    </button>
+                    <button id="btn-create" class="nav-btn">
+                        <i class="fas fa-plus"></i> Criar Rota
+                    </button>
+                    <button id="btn-debug" class="nav-btn" onclick="debugInfo()" style="background: #ff6b6b;">
+                        <i class="fas fa-bug"></i> Debug
+                    </button>
+                </nav>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <div class="container">
+                <!-- Seção de Rotas -->
+                <section id="routes-section" class="section active">
+                    <h2>Minhas Rotas</h2>
+                    <div id="routes-list" class="routes-grid">
+                        <div class="loading">
+                            <i class="fas fa-spinner fa-spin"></i> Carregando rotas...
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Seção de Pontos Turísticos -->
+                <section id="spots-section" class="section">
+                    <h2>Pontos Turísticos</h2>
+                    <div class="search-bar">
+                        <input type="text" id="search-spots" placeholder="Buscar pontos turísticos...">
+                        <button id="btn-search">
+                            <i class="fas fa-search"></i>
+                        </button>
+                    </div>
+                    <div id="spots-list" class="spots-grid">
+                        <div class="loading">
+                            <i class="fas fa-spinner fa-spin"></i> Carregando pontos turísticos...
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Seção de Criar Rota -->
+                <section id="create-section" class="section">
+                    <h2>Criar Nova Rota</h2>
+                    <form id="create-route-form" class="form">
+                        <div class="form-group">
+                            <label for="route-name">Nome da Rota</label>
+                            <input type="text" id="route-name" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="route-description">Descrição</label>
+                            <textarea id="route-description" rows="3"></textarea>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="start-date">Data de Início</label>
+                                <input type="date" id="start-date" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="end-date">Data de Fim</label>
+                                <input type="date" id="end-date">
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Pontos Turísticos Selecionados</label>
+                            <div id="selected-spots" class="selected-spots">
+                                <p class="empty-state">Nenhum ponto selecionado</p>
+                            </div>
+                        </div>
+
+                        <div class="form-actions">
+                            <button type="button" id="btn-select-spots" class="btn btn-secondary">
+                                <i class="fas fa-map-marker-alt"></i> Selecionar Pontos
+                            </button>
+                            <button type="button" id="btn-preview-route" class="btn btn-view-route"
+                                onclick="previewRoute()">
+                                <i class="fas fa-map"></i> Visualizar Rota
+                            </button>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save"></i> Salvar Rota
+                            </button>
+                        </div>
+                    </form>
+                </section>
+            </div>
+        </main>
+
+        <!-- Modal para seleção de pontos -->
+        <div id="spots-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Selecionar Pontos Turísticos</h3>
+                    <button class="close-modal">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div id="modal-spots-list" class="modal-spots-grid">
+                        <!-- Pontos carregados dinamicamente -->
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="btn-confirm-spots" class="btn btn-primary">
+                        Confirmar Seleção
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Notificações -->
+        <div id="notifications" class="notifications"></div>
+    </div>
+
+    <!-- Leaflet JavaScript for real maps -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" 
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    
+    <!-- Leaflet Routing Machine for route calculation -->
+    <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js"></script>
+    
+    <script src="app.js"></script>
+</body>
+
+</html>
