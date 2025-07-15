@@ -17,20 +17,20 @@ const TouristSpots = ({ setCurrentView }) => {
   const [userLocation, setUserLocation] = useState(null);
   const [locationLoading, setLocationLoading] = useState(true);
   const [locationError, setLocationError] = useState(null);
-  
+
   const { t } = useLanguage();
 
   useEffect(() => {
     const initializeComponent = async () => {
       console.log('🚀 Inicializando componente TouristSpots...');
-      
+
       // Primeiro tenta obter a localização
       await getCurrentLocation();
-      
+
       // Se não conseguiu a localização, carrega pontos sem filtro
       // (loadTouristSpots será chamado automaticamente em getCurrentLocation)
     };
-    
+
     initializeComponent();
   }, []);
 
@@ -47,18 +47,18 @@ const TouristSpots = ({ setCurrentView }) => {
       setLocationLoading(true);
       setLocationError(null);
       console.log('🌍 Iniciando processo de geolocalização...');
-      
+
       const position = await geolocationService.requestLocation();
       setUserLocation(position);
       console.log('✅ Localização obtida:', position);
-      
+
       // Recarregar pontos turísticos com a nova localização
       loadTouristSpotsWithLocation(position);
-      
+
     } catch (err) {
       console.error('❌ Erro ao obter localização:', err);
       setLocationError(err.message);
-      
+
       // Carregar pontos sem filtro de localização
       loadTouristSpotsWithoutLocation();
     } finally {
@@ -71,13 +71,13 @@ const TouristSpots = ({ setCurrentView }) => {
     try {
       setLoading(true);
       console.log('🎯 Carregando pontos próximos à localização:', location);
-      
+
       const data = await touristSpotService.getTouristSpots({
         lat: location.latitude,
         lng: location.longitude,
         radius: 50 // Busca pontos em um raio de 50km
       });
-      
+
       setSpots(data);
       setFilteredSpots(data);
       console.log(`✅ ${data.length} pontos turísticos carregados com base na localização`);
@@ -93,7 +93,7 @@ const TouristSpots = ({ setCurrentView }) => {
     try {
       setLoading(true);
       console.log('📍 Carregando todos os pontos turísticos (sem filtro de localização)');
-      
+
       const data = await touristSpotService.getTouristSpots();
       setSpots(data);
       setFilteredSpots(data);
@@ -132,10 +132,10 @@ const TouristSpots = ({ setCurrentView }) => {
       try {
         console.log('🔍 Buscando pontos externos para:', searchTerm);
         const externalResults = await touristSpotService.searchExternalSpots(searchTerm);
-        
+
         // Filtrar resultados externos para evitar duplicatas
-        const filteredExternal = externalResults.filter(extSpot => 
-          !localFiltered.some(localSpot => 
+        const filteredExternal = externalResults.filter(extSpot =>
+          !localFiltered.some(localSpot =>
             localSpot.nome.toLowerCase() === extSpot.nome.toLowerCase()
           )
         );
@@ -246,68 +246,67 @@ const TouristSpots = ({ setCurrentView }) => {
           ) : (
             filteredSpots.map((spot) => {
               const isExternal = spot.source === 'nominatim' || (spot.id && spot.id.toString().startsWith('ext_'));
-              
-              return (
-              <Card
-                key={spot.id}
-                className={`cursor-pointer transition-all hover:shadow-md ${
-                  selectedSpot?.id === spot.id ? 'ring-2 ring-blue-500 bg-blue-50' : ''
-                }`}
-                onClick={() => handleSpotClick(spot)}
-              >
-                <CardContent className="p-4">
-                  <div className="flex items-start space-x-3">
-                    {/* Imagem */}
-                    <div className="w-16 h-16 bg-gray-200 rounded-lg overflow-hidden flex-shrink-0 relative">
-                      {spot.imagem_url ? (
-                        <img
-                          src={spot.imagem_url}
-                          alt={spot.nome}
-                          className="w-full h-full object-cover"
-                          onError={(e) => {
-                            e.target.style.display = 'none';
-                          }}
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center">
-                          <MapPin className="h-6 w-6 text-gray-400" />
-                        </div>
-                      )}
-                      {/* Indicador de ponto externo */}
-                      {isExternal && (
-                        <div className="absolute top-1 right-1">
-                          <Badge variant="secondary" className="text-xs px-1 py-0">
-                            🌐
-                          </Badge>
-                        </div>
-                      )}
-                    </div>
 
-                    {/* Informações */}
-                    <div className="flex-1 min-w-0">
-                      <h4 className="font-medium text-gray-900 mb-1 truncate flex items-center space-x-2">
-                        <span>{spot.nome}</span>
-                        {isExternal && (
-                          <Badge variant="outline" className="text-xs">
-                            Externo
-                          </Badge>
+              return (
+                <Card
+                  key={spot.id}
+                  className={`cursor-pointer transition-all hover:shadow-md ${selectedSpot?.id === spot.id ? 'ring-2 ring-blue-500 bg-blue-50' : ''
+                    }`}
+                  onClick={() => handleSpotClick(spot)}
+                >
+                  <CardContent className="p-4">
+                    <div className="flex items-start space-x-3">
+                      {/* Imagem */}
+                      <div className="w-16 h-16 bg-gray-200 rounded-lg overflow-hidden flex-shrink-0 relative">
+                        {spot.imagem_url ? (
+                          <img
+                            src={spot.imagem_url}
+                            alt={spot.nome}
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              e.target.style.display = 'none';
+                            }}
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <MapPin className="h-6 w-6 text-gray-400" />
+                          </div>
                         )}
-                      </h4>
-                      <p className="text-sm text-gray-500 line-clamp-3 mb-2">
-                        {spot.descricao}
-                      </p>
-                      <div className="flex items-center space-x-1 text-xs text-gray-400">
-                        <MapPin className="h-3 w-3" />
-                        <span>
-                          {spot.localizacao?.latitude?.toFixed(4)},{' '}
-                          {spot.localizacao?.longitude?.toFixed(4)}
-                        </span>
+                        {/* Indicador de ponto externo */}
+                        {isExternal && (
+                          <div className="absolute top-1 right-1">
+                            <Badge variant="secondary" className="text-xs px-1 py-0">
+                              🌐
+                            </Badge>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Informações */}
+                      <div className="flex-1 min-w-0">
+                        <h4 className="font-medium text-gray-900 mb-1 truncate flex items-center space-x-2">
+                          <span>{spot.nome}</span>
+                          {isExternal && (
+                            <Badge variant="outline" className="text-xs">
+                              Externo
+                            </Badge>
+                          )}
+                        </h4>
+                        <p className="text-sm text-gray-500 line-clamp-3 mb-2">
+                          {spot.descricao}
+                        </p>
+                        <div className="flex items-center space-x-1 text-xs text-gray-400">
+                          <MapPin className="h-3 w-3" />
+                          <span>
+                            {spot.localizacao?.latitude?.toFixed(4)},{' '}
+                            {spot.localizacao?.longitude?.toFixed(4)}
+                          </span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </CardContent>
-              </Card>
-            );
+                  </CardContent>
+                </Card>
+              );
             })
           )}
         </div>

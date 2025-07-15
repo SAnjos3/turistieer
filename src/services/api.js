@@ -126,7 +126,7 @@ export const geolocationService = {
             lng: position.coords.longitude,
             accuracy: position.coords.accuracy
           });
-          
+
           resolve({
             latitude: position.coords.latitude,
             longitude: position.coords.longitude,
@@ -136,10 +136,10 @@ export const geolocationService = {
         },
         (error) => {
           console.error('❌ Erro de geolocalização:', error);
-          
+
           // Personalizar mensagens de erro
           let errorMessage = 'Erro ao obter localização';
-          switch(error.code) {
+          switch (error.code) {
             case error.PERMISSION_DENIED:
               errorMessage = 'Acesso à localização foi negado. Por favor, permita o acesso à sua localização.';
               break;
@@ -150,7 +150,7 @@ export const geolocationService = {
               errorMessage = 'Tempo limite para obter localização. Tente novamente.';
               break;
           }
-          
+
           const customError = new Error(errorMessage);
           customError.code = error.code;
           reject(customError);
@@ -175,21 +175,21 @@ export const geolocationService = {
         return 'unknown';
       }
     }
-    
+
     return 'unknown';
   },
 
   // Solicitar permissão de localização (mais amigável)
   requestLocation: async () => {
     console.log('🌍 Verificando permissões de geolocalização...');
-    
+
     const permission = await geolocationService.checkPermission();
     console.log('📋 Status da permissão:', permission);
-    
+
     if (permission === 'denied') {
       throw new Error('Acesso à localização foi negado anteriormente. Por favor, permita o acesso nas configurações do navegador.');
     }
-    
+
     return geolocationService.getCurrentPosition();
   },
   watchPosition: (callback, errorCallback) => {

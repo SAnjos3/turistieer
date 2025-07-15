@@ -58,10 +58,10 @@ const TouristSpotSelector = ({ onSelectSpot, onClose, selectedSpots = [] }) => {
       try {
         console.log('Buscando pontos externos para:', searchTerm);
         const externalResults = await touristSpotService.searchExternalSpots(searchTerm);
-        
+
         // Filtrar resultados externos para evitar duplicatas
-        const filteredExternal = externalResults.filter(extSpot => 
-          !localFiltered.some(localSpot => 
+        const filteredExternal = externalResults.filter(extSpot =>
+          !localFiltered.some(localSpot =>
             localSpot.nome.toLowerCase() === extSpot.nome.toLowerCase()
           )
         );
@@ -146,13 +146,12 @@ const TouristSpotSelector = ({ onSelectSpot, onClose, selectedSpots = [] }) => {
               {filteredSpots.map((spot) => {
                 const isSelected = isSpotSelected(spot.id);
                 const isExternal = spot.source === 'nominatim' || (spot.id && spot.id.toString().startsWith('ext_'));
-                
+
                 return (
-                  <Card 
-                    key={spot.id} 
-                    className={`cursor-pointer transition-all hover:shadow-md ${
-                      isSelected ? 'ring-2 ring-blue-500 bg-blue-50' : ''
-                    }`}
+                  <Card
+                    key={spot.id}
+                    className={`cursor-pointer transition-all hover:shadow-md ${isSelected ? 'ring-2 ring-blue-500 bg-blue-50' : ''
+                      }`}
                     onClick={() => handleSelectSpot(spot)}
                   >
                     <CardContent className="p-4">

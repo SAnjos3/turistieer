@@ -298,7 +298,7 @@ async function loadTouristSpots() {
             const data = await response.json();
             const localSpots = data.tourist_spots || data;
             console.log(`📊 Pontos locais carregados: ${localSpots.length}`);
-            
+
             spots = localSpots;
         } catch (error) {
             console.log('❌ Erro ao carregar pontos locais:', error);
@@ -309,18 +309,18 @@ async function loadTouristSpots() {
             console.log('🌐 Buscando pontos próximos da API externa...');
             try {
                 // Usar API do Nominatim diretamente para buscar pontos próximos
-                const nominatimUrl = `https://nominatim.openstreetmap.org/search?format=json&limit=20&addressdetails=1&extratags=1&namedetails=1&q=tourism&bounded=1&viewbox=${userLocation.longitude-0.3},${userLocation.latitude+0.3},${userLocation.longitude+0.3},${userLocation.latitude-0.3}`;
-                
+                const nominatimUrl = `https://nominatim.openstreetmap.org/search?format=json&limit=20&addressdetails=1&extratags=1&namedetails=1&q=tourism&bounded=1&viewbox=${userLocation.longitude - 0.3},${userLocation.latitude + 0.3},${userLocation.longitude + 0.3},${userLocation.latitude - 0.3}`;
+
                 const nominatimResponse = await fetch(nominatimUrl);
                 if (nominatimResponse.ok) {
                     const nominatimData = await nominatimResponse.json();
                     console.log(`🌐 Nominatim retornou: ${nominatimData.length} pontos`);
-                    
+
                     // Processar pontos do Nominatim
                     const externalSpots = nominatimData.map(item => {
                         const lat = parseFloat(item.lat);
                         const lng = parseFloat(item.lon);
-                        
+
                         // Calcular distância
                         const distance = calculateDistance(
                             userLocation.latitude,
@@ -328,7 +328,7 @@ async function loadTouristSpots() {
                             lat,
                             lng
                         );
-                        
+
                         return {
                             id: `ext_${item.place_id}`,
                             nome: item.display_name.split(',')[0] || item.name || 'Ponto Turístico',
@@ -343,9 +343,9 @@ async function loadTouristSpots() {
                             importance: item.importance || 0
                         };
                     }).filter(spot => spot.distance <= 30); // Filtrar até 30km
-                    
+
                     console.log(`🎯 Pontos externos próximos (≤30km): ${externalSpots.length}`);
-                    
+
                     // Adicionar pontos externos aos locais
                     spots = [...spots, ...externalSpots];
                 }
@@ -357,7 +357,7 @@ async function loadTouristSpots() {
         // Se temos localização, calcular distâncias e filtrar/ordenar
         if (userLocation) {
             console.log('📐 Calculando distâncias e filtrando por proximidade...');
-            
+
             spots = spots.map(spot => {
                 if (spot.localizacao) {
                     const distance = calculateDistance(
@@ -370,21 +370,21 @@ async function loadTouristSpots() {
                 }
                 return { ...spot, distance: Infinity };
             })
-            .filter(spot => spot.distance <= 50) // FILTRAR: apenas pontos até 50km
-            .sort((a, b) => a.distance - b.distance); // ORDENAR: por proximidade
+                .filter(spot => spot.distance <= 50) // FILTRAR: apenas pontos até 50km
+                .sort((a, b) => a.distance - b.distance); // ORDENAR: por proximidade
 
             console.log(`🎯 Pontos filtrados (≤50km): ${spots.length}`);
-            
+
             if (spots.length > 0) {
-                console.log('🏆 5 pontos mais próximos:', spots.slice(0, 5).map(s => ({ 
-                    nome: s.nome, 
+                console.log('🏆 5 pontos mais próximos:', spots.slice(0, 5).map(s => ({
+                    nome: s.nome,
                     distance: s.distance?.toFixed(2) + 'km',
-                    categoria: s.categoria 
+                    categoria: s.categoria
                 })));
-                
+
                 console.log('📊 Estatísticas dos pontos próximos:');
                 console.log('- Mais próximo:', spots[0]?.distance?.toFixed(2) + 'km');
-                console.log('- Mais distante:', spots[spots.length-1]?.distance?.toFixed(2) + 'km');
+                console.log('- Mais distante:', spots[spots.length - 1]?.distance?.toFixed(2) + 'km');
                 console.log('- Dentro de 5km:', spots.filter(s => s.distance <= 5).length);
                 console.log('- Dentro de 15km:', spots.filter(s => s.distance <= 15).length);
                 console.log('- Dentro de 30km:', spots.filter(s => s.distance <= 30).length);
@@ -396,10 +396,10 @@ async function loadTouristSpots() {
         allSpots = spots;
         availableSpots = [...spots];
         console.log(`✅ Total de pontos carregados: ${allSpots.length}`);
-        
+
         displayTouristSpots(spots);
         populateModalSpots(spots);
-        
+
         // Mostrar mensagem sobre localização
         if (userLocation && spots.length > 0) {
             showNotification(`📍 Mostrando ${spots.length} pontos turísticos próximos (até 50km)`, 'success');
@@ -408,7 +408,7 @@ async function loadTouristSpots() {
         } else if (!userLocation) {
             showNotification('📍 Para ver pontos próximos, permita acesso à localização', 'info');
         }
-        
+
     } catch (error) {
         console.error('Erro ao carregar pontos turísticos:', error);
         document.getElementById('spots-list').innerHTML = `
@@ -1916,9 +1916,9 @@ async function exportRoutePDF(routeId) {
         // PRIORIDADE 1: Verificar se estamos na visualização de rota (mapa visível)
         const routeViewModal = document.getElementById('route-details-modal');
         const isMapVisible = routeViewModal && !routeViewModal.style.display === 'none' && routeViewModal.classList.contains('active');
-        
+
         let mapImageData = null;
-        
+
         if (isMapVisible) {
             // CAPTURAR EXATAMENTE O MAPA DA TELA
             showNotification('📸 Capturando mapa da tela...', 'info');
@@ -1926,10 +1926,10 @@ async function exportRoutePDF(routeId) {
                 const mapContainer = document.getElementById('route-detail-map');
                 if (mapContainer && typeof html2canvas !== 'undefined') {
                     console.log('Capturando mapa visível da tela...');
-                    
+
                     // Aguardar um pouco para garantir renderização
                     await new Promise(resolve => setTimeout(resolve, 1000));
-                    
+
                     const canvas = await html2canvas(mapContainer, {
                         useCORS: true,
                         allowTaint: true,
@@ -1940,7 +1940,7 @@ async function exportRoutePDF(routeId) {
                         width: mapContainer.offsetWidth,
                         foreignObjectRendering: true
                     });
-                    
+
                     mapImageData = canvas.toDataURL('image/png', 0.9);
                     console.log('✅ Mapa da tela capturado com sucesso!');
                 } else {
@@ -1954,15 +1954,15 @@ async function exportRoutePDF(routeId) {
         // PRIORIDADE 2: Se não conseguiu capturar da tela, abrir a visualização primeiro
         if (!mapImageData) {
             showNotification('⏳ Abrindo visualização para capturar mapa...', 'info');
-            
+
             // Verificar se já temos um modal aberto, se não, abrir
             if (!routeViewModal) {
                 // Abrir a visualização
                 await viewRouteWithMap(routeId);
-                
+
                 // Aguardar o mapa carregar
                 await new Promise(resolve => setTimeout(resolve, 3000));
-                
+
                 // Tentar capturar novamente
                 const newMapContainer = document.getElementById('route-detail-map');
                 if (newMapContainer && typeof html2canvas !== 'undefined') {
@@ -1974,14 +1974,14 @@ async function exportRoutePDF(routeId) {
                             backgroundColor: '#ffffff',
                             logging: false
                         });
-                        
+
                         mapImageData = canvas.toDataURL('image/png', 0.9);
                         console.log('✅ Mapa capturado após abrir visualização!');
-                        
+
                         // Fechar o modal após capturar
                         const modalToClose = document.getElementById('route-details-modal');
                         if (modalToClose) modalToClose.remove();
-                        
+
                     } catch (error) {
                         console.log('❌ Erro ao capturar após abrir visualização:', error);
                     }
@@ -1991,10 +1991,10 @@ async function exportRoutePDF(routeId) {
 
         // Enviar para o backend
         showNotification('📄 Gerando PDF...', 'info');
-        
+
         const formData = new FormData();
         formData.append('route_data', JSON.stringify(route));
-        
+
         if (mapImageData && mapImageData.startsWith('data:image/')) {
             // Converter base64 para blob
             const response = await fetch(mapImageData);
@@ -2139,26 +2139,26 @@ function generateSimpleMapSVG(points) {
         for (let i = 1; i < points.length; i++) {
             pathData += ` L ${lngToX(points[i].localizacao.longitude)} ${latToY(points[i].localizacao.latitude)}`;
         }
-        
+
         // Linha de fundo (mais grossa e clara)
         svg += `<path d="${pathData}" stroke="#b3d9ff" stroke-width="6" fill="none"/>`;
         // Linha principal (azul)
         svg += `<path d="${pathData}" stroke="#007bff" stroke-width="4" fill="none"/>`;
-        
+
         // Adicionar setas indicando direção
         for (let i = 0; i < points.length - 1; i++) {
             const x1 = lngToX(points[i].localizacao.longitude);
             const y1 = latToY(points[i].localizacao.latitude);
             const x2 = lngToX(points[i + 1].localizacao.longitude);
             const y2 = latToY(points[i + 1].localizacao.latitude);
-            
+
             // Calcular ponto médio e ângulo
             const midX = (x1 + x2) / 2;
             const midY = (y1 + y2) / 2;
             const angle = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
-            
+
             // Adicionar seta pequena
-            svg += `<polygon points="${midX-5},${midY-3} ${midX+8},${midY} ${midX-5},${midY+3}" 
+            svg += `<polygon points="${midX - 5},${midY - 3} ${midX + 8},${midY} ${midX - 5},${midY + 3}" 
                     fill="#007bff" transform="rotate(${angle} ${midX} ${midY})"/>`;
         }
     }

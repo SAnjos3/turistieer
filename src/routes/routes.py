@@ -5,6 +5,7 @@ from src.models.route import Route
 import json
 import requests
 import math
+import traceback
 
 routes_bp = Blueprint('routes', __name__)
 
@@ -12,7 +13,18 @@ routes_bp = Blueprint('routes', __name__)
 def create_route():
     """Criar uma nova rota turística"""
     try:
-        data = request.get_json()
+        print('--- [DEBUG] Recebido POST /api/routes ---')
+        print('Headers:', dict(request.headers))
+        print('Raw data:', request.get_data(as_text=True))
+        try:
+            data = request.get_json(force=True)
+            print('JSON decodificado:', data)
+        except Exception as json_err:
+            print('Erro ao decodificar JSON:', json_err)
+            raise
+        
+        for key in ['nome', 'data_inicio', 'pontos_turisticos', 'user_id']:
+            print(f"Campo '{key}':", data.get(key))
         
         # Validações básicas
         if not data.get('nome'):
@@ -51,9 +63,7 @@ def create_route():
         # Criar nova rota
         nova_rota = Route(
             nome=data['nome'],
-            descricao=data.get('descricao'),
             data_inicio=data_inicio,
-            data_fim=data_fim,
             pontos_turisticos=json.dumps(pontos_turisticos),
             user_id=data.get('user_id', 1)  # Default user para MVP
         )
@@ -61,11 +71,14 @@ def create_route():
         db.session.add(nova_rota)
         db.session.commit()
         
-        return jsonify(nova_rota.to_dict()), 201
+        return jsonify({'message': 'Rota criada com sucesso!'}), 201
         
     except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        print('--- [ERRO 500] ---')
+        print('Payload recebido:', request.get_data(as_text=True))
+        print('Traceback completo:')
+        traceback.print_exc()
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 @routes_bp.route('/routes', methods=['GET'])
 def get_routes():

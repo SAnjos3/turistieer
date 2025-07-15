@@ -202,7 +202,7 @@ describe('US01 - Criar Rotas Turísticas', () => {
   test('deve desabilitar botão durante envio', async () => {
     const user = userEvent.setup();
     // Simular resposta lenta
-    mockRouteService.createRoute.mockImplementation(() => 
+    mockRouteService.createRoute.mockImplementation(() =>
       new Promise(resolve => setTimeout(resolve, 1000))
     );
 
