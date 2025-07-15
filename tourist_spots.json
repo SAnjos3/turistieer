@@ -98,6 +98,55 @@
     },
     "imagem_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/2/2f/Lagoa_Rodrigo_de_Freitas_Rio_de_Janeiro_Brazil.jpg/800px-Lagoa_Rodrigo_de_Freitas_Rio_de_Janeiro_Brazil.jpg",
     "descricao": "Lagoa cercada por montanhas, ideal para atividades ao ar livre e contemplação da natureza."
+  },
+  {
+    "id": 11,
+    "nome": "Congresso Nacional",
+    "localizacao": {
+      "latitude": -15.799722,
+      "longitude": -47.864167
+    },
+    "imagem_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/2/2c/Congresso_Nacional_do_Brasil_Brasilia.jpg/800px-Congresso_Nacional_do_Brasil_Brasilia.jpg",
+    "descricao": "Sede do Poder Legislativo brasileiro, com arquitetura modernista icônica de Oscar Niemeyer."
+  },
+  {
+    "id": 12,
+    "nome": "Catedral de Brasília",
+    "localizacao": {
+      "latitude": -15.798056,
+      "longitude": -47.875833
+    },
+    "imagem_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/8c/Catedral_de_Brasilia.jpg/800px-Catedral_de_Brasilia.jpg",
+    "descricao": "Catedral Metropolitana com design futurista de Oscar Niemeyer, símbolo arquitetônico de Brasília."
+  },
+  {
+    "id": 13,
+    "nome": "Palácio da Alvorada",
+    "localizacao": {
+      "latitude": -15.791667,
+      "longitude": -47.834444
+    },
+    "imagem_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f5/Palacio_da_Alvorada_Brasilia.jpg/800px-Palacio_da_Alvorada_Brasilia.jpg",
+    "descricao": "Residência oficial da Presidência da República, marco da arquitetura modernista brasileira."
+  },
+  {
+    "id": 14,
+    "nome": "Esplanada dos Ministérios",
+    "localizacao": {
+      "latitude": -15.802778,
+      "longitude": -47.871111
+    },
+    "imagem_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a1/Esplanada_dos_Ministerios_Brasilia.jpg/800px-Esplanada_dos_Ministerios_Brasilia.jpg",
+    "descricao": "Grande eixo monumental que abriga os ministérios do governo federal, coração político do Brasil."
+  },
+  {
+    "id": 15,
+    "nome": "Ponte JK",
+    "localizacao": {
+      "latitude": -15.816667,
+      "longitude": -47.831111
+    },
+    "imagem_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3b/Ponte_JK_Brasilia.jpg/800px-Ponte_JK_Brasilia.jpg",
+    "descricao": "Ponte estaiada sobre o Lago Paranoá, uma das mais belas pontes do Brasil e cartão-postal de Brasília."
   }
 ]
-

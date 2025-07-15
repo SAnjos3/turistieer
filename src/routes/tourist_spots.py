@@ -3,6 +3,7 @@ import json
 import os
 import requests
 from urllib.parse import quote
+import math
 
 tourist_spots_bp = Blueprint('tourist_spots', __name__)
 
@@ -201,4 +202,247 @@ def search_nominatim(query):
     except Exception as e:
         print(f"Erro no processamento Nominatim: {e}")
         return []
+
+@tourist_spots_bp.route('/search-nearby-spots', methods=['POST'])
+def search_nearby_spots():
+    """Buscar pontos turísticos próximos usando API externa (Overpass/OpenStreetMap)"""
+    try:
+        data = request.get_json()
+        latitude = data.get('latitude')
+        longitude = data.get('longitude')
+        radius = data.get('radius', 30)  # km
+        categories = data.get('categories', ['tourism', 'attraction'])
+        limit = data.get('limit', 50)
+        
+        if not latitude or not longitude:
+            return jsonify({'error': 'Latitude e longitude são obrigatórios'}), 400
+            
+        # Construir consulta Overpass QL
+        # Converter raio de km para graus (aproximado: 1 grau ≈ 111 km)
+        radius_deg = radius / 111.0
+        
+        # Construir filtros por categoria
+        category_filters = []
+        for category in categories:
+            if category == 'tourism':
+                category_filters.extend([
+                    'tourism=attraction',
+                    'tourism=museum',
+                    'tourism=viewpoint',
+                    'tourism=monument',
+                    'tourism=artwork',
+                    'tourism=gallery',
+                    'tourism=information',
+                    'tourism=theme_park'
+                ])
+            elif category == 'historic':
+                category_filters.extend([
+                    'historic=monument',
+                    'historic=memorial',
+                    'historic=castle',
+                    'historic=ruins',
+                    'historic=archaeological_site',
+                    'historic=building'
+                ])
+            elif category == 'natural':
+                category_filters.extend([
+                    'natural=peak',
+                    'natural=waterfall',
+                    'natural=beach',
+                    'natural=cave_entrance'
+                ])
+            elif category == 'park':
+                category_filters.extend([
+                    'leisure=park',
+                    'leisure=nature_reserve',
+                    'tourism=zoo'
+                ])
+            else:
+                category_filters.append(f'{category}=*')
+        
+        # Construir query Overpass
+        bbox = f"{latitude - radius_deg},{longitude - radius_deg},{latitude + radius_deg},{longitude + radius_deg}"
+        
+        # Query para nós (points)
+        node_queries = []
+        for filter_item in category_filters:
+            node_queries.append(f'node[{filter_item}]({bbox});')
+        
+        # Query para ways (áreas)
+        way_queries = []
+        for filter_item in category_filters:
+            way_queries.append(f'way[{filter_item}]({bbox});')
+        
+        overpass_query = f"""
+        [out:json][timeout:25];
+        (
+          {''.join(node_queries)}
+          {''.join(way_queries)}
+        );
+        out center meta;
+        """
+        
+        print(f"🌐 Buscando pontos próximos: lat={latitude}, lng={longitude}, radius={radius}km")
+        print(f"📋 Categorias: {categories}")
+        
+        # Fazer requisição para API Overpass
+        overpass_url = "https://overpass-api.de/api/interpreter"
+        
+        try:
+            response = requests.post(
+                overpass_url, 
+                data=overpass_query, 
+                timeout=30,
+                headers={'Content-Type': 'text/plain; charset=utf-8'}
+            )
+            
+            if response.status_code == 200:
+                overpass_data = response.json()
+                elements = overpass_data.get('elements', [])
+                
+                print(f"✅ Overpass retornou {len(elements)} elementos")
+                
+                # Processar resultados
+                spots = []
+                for element in elements:
+                    try:
+                        # Obter coordenadas
+                        if element['type'] == 'node':
+                            elem_lat = element['lat']
+                            elem_lng = element['lon']
+                        elif element['type'] == 'way' and 'center' in element:
+                            elem_lat = element['center']['lat']
+                            elem_lng = element['center']['lon']
+                        else:
+                            continue
+                        
+                        # Calcular distância real
+                        distance = calculate_distance(latitude, longitude, elem_lat, elem_lng)
+                        
+                        # Filtrar por raio real
+                        if distance > radius:
+                            continue
+                        
+                        # Extrair informações
+                        tags = element.get('tags', {})
+                        name = tags.get('name', tags.get('name:pt', tags.get('name:en', 'Ponto Turístico')))
+                        
+                        # Determinar categoria
+                        category = 'Outros'
+                        if 'tourism' in tags:
+                            category = f"Turismo - {tags['tourism'].title()}"
+                        elif 'historic' in tags:
+                            category = f"Histórico - {tags['historic'].title()}"
+                        elif 'natural' in tags:
+                            category = f"Natural - {tags['natural'].title()}"
+                        elif 'leisure' in tags:
+                            category = f"Lazer - {tags['leisure'].title()}"
+                        
+                        # Construir descrição
+                        description_parts = []
+                        description_parts.append(f"{category}")
+                        
+                        if 'addr:city' in tags:
+                            description_parts.append(f"📍 {tags['addr:city']}")
+                        if 'addr:state' in tags:
+                            description_parts.append(f"{tags['addr:state']}")
+                        if 'website' in tags:
+                            description_parts.append(f"🌐 {tags['website']}")
+                        if 'opening_hours' in tags:
+                            description_parts.append(f"🕒 {tags['opening_hours']}")
+                        
+                        spot = {
+                            'id': f"ext_{element['id']}",
+                            'nome': name,
+                            'descricao': ' - '.join(description_parts),
+                            'categoria': category,
+                            'localizacao': {
+                                'latitude': elem_lat,
+                                'longitude': elem_lng
+                            },
+                            'distance': distance,
+                            'source': 'overpass',
+                            'relevancia': calculate_relevance(tags, distance)
+                        }
+                        
+                        spots.append(spot)
+                        
+                    except Exception as e:
+                        print(f"❌ Erro ao processar elemento: {e}")
+                        continue
+                
+                # Ordenar por relevância e distância
+                spots.sort(key=lambda x: (-x['relevancia'], x['distance']))
+                
+                # Limitar resultados
+                spots = spots[:limit]
+                
+                print(f"🎯 Retornando {len(spots)} pontos processados")
+                return jsonify(spots)
+                
+            else:
+                print(f"❌ Erro na API Overpass: {response.status_code}")
+                return jsonify({'error': 'Erro ao buscar pontos na API externa'}), 500
+                
+        except requests.exceptions.Timeout:
+            print("⏰ Timeout na API Overpass")
+            return jsonify({'error': 'Timeout na busca de pontos'}), 408
+        except requests.exceptions.RequestException as e:
+            print(f"🌐 Erro de rede na API Overpass: {e}")
+            return jsonify({'error': 'Erro de conexão com API externa'}), 503
+            
+    except Exception as e:
+        print(f"💥 Erro geral em search_nearby_spots: {e}")
+        return jsonify({'error': str(e)}), 500
+
+def calculate_distance(lat1, lng1, lat2, lng2):
+    """Calcular distância entre duas coordenadas em km"""
+    R = 6371  # Raio da Terra em km
+    
+    lat1_rad = math.radians(lat1)
+    lat2_rad = math.radians(lat2)
+    delta_lat = math.radians(lat2 - lat1)
+    delta_lng = math.radians(lng2 - lng1)
+    
+    a = (math.sin(delta_lat / 2) ** 2 + 
+         math.cos(lat1_rad) * math.cos(lat2_rad) * 
+         math.sin(delta_lng / 2) ** 2)
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    
+    return R * c
+
+def calculate_relevance(tags, distance):
+    """Calcular relevância de um ponto turístico"""
+    relevance = 0
+    
+    # Pontuação base por tipo
+    if 'tourism' in tags:
+        if tags['tourism'] in ['attraction', 'museum', 'monument', 'viewpoint']:
+            relevance += 10
+        else:
+            relevance += 5
+    
+    if 'historic' in tags:
+        if tags['historic'] in ['monument', 'castle', 'archaeological_site']:
+            relevance += 8
+        else:
+            relevance += 4
+    
+    # Bonus por ter nome
+    if 'name' in tags and len(tags['name']) > 3:
+        relevance += 3
+    
+    # Bonus por ter site
+    if 'website' in tags:
+        relevance += 2
+    
+    # Bonus por ter horário
+    if 'opening_hours' in tags:
+        relevance += 1
+    
+    # Penalidade por distância
+    distance_penalty = distance / 10  # Reduz 1 ponto a cada 10km
+    relevance = max(0, relevance - distance_penalty)
+    
+    return relevance
 

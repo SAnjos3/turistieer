@@ -227,8 +227,13 @@ async function requestUserLocation() {
         };
 
         console.log('📍 Localização obtida e armazenada:', userLocation);
-        showNotification('📍 Localização obtida! Mostrando pontos próximos.', 'success');
+        showNotification('📍 Localização obtida! Recarregando pontos próximos...', 'success');
         updateLocationStatus(true);
+
+        // RECARREGAR pontos turísticos com a nova localização
+        if (currentSection === 'spots') {
+            loadTouristSpots();
+        }
 
     } catch (error) {
         console.error('Erro ao obter localização:', error);
@@ -284,73 +289,134 @@ async function loadTouristSpots() {
         console.log('🏃 Iniciando carregamento de pontos turísticos...');
         console.log('📍 Localização disponível:', userLocation ? 'SIM' : 'NÃO');
 
-        // Construir URL da API com parâmetros de localização se disponível
-        let apiUrl = `${API_BASE_URL}/tourist-spots`;
-        if (userLocation) {
-            const params = new URLSearchParams({
-                lat: userLocation.latitude,
-                lng: userLocation.longitude,
-                radius: 50, // 50km de raio
-                category: 'tourism,attraction,historic,museum,monument,church,castle,archaeological_site,viewpoint' // Categorias turísticas
-            });
-            apiUrl += `?${params.toString()}`;
-            console.log('🎯 URL da API com localização:', apiUrl);
-        }
+        let spots = [];
 
-        // Primeiro tenta carregar da API
-        let spots;
+        // Sempre carregar pontos do arquivo local primeiro
+        console.log('📁 Carregando pontos do arquivo local...');
         try {
-            console.log('🌐 Tentando carregar pontos da API...');
-            const response = await fetch(apiUrl);
-            if (response.ok) {
-                spots = await response.json();
-                console.log(`✅ Pontos carregados da API: ${spots.length}${userLocation ? ' (filtrados por localização)' : ''}`);
-            } else {
-                console.log('❌ API não respondeu corretamente, status:', response.status);
-                throw new Error('API não disponível');
-            }
-        } catch (apiError) {
-            // Se a API não funcionar, carrega do arquivo JSON local
-            console.log('📁 API não disponível, carregando dados locais...');
             const response = await fetch('/tourist_spots.json');
             const data = await response.json();
-            spots = data.tourist_spots || data;
+            const localSpots = data.tourist_spots || data;
+            console.log(`📊 Pontos locais carregados: ${localSpots.length}`);
+            
+            spots = localSpots;
+        } catch (error) {
+            console.log('❌ Erro ao carregar pontos locais:', error);
+        }
 
-            console.log('📊 Pontos do arquivo local:', spots.length);
-
-            // Se temos localização do usuário, ordenar por proximidade
-            if (userLocation) {
-                console.log('📐 Calculando distâncias e ordenando por proximidade...');
-                spots = spots.map(spot => {
-                    if (spot.localizacao) {
+        // Se temos localização, buscar também pontos próximos da API externa
+        if (userLocation && spots.length < 20) {
+            console.log('🌐 Buscando pontos próximos da API externa...');
+            try {
+                // Usar API do Nominatim diretamente para buscar pontos próximos
+                const nominatimUrl = `https://nominatim.openstreetmap.org/search?format=json&limit=20&addressdetails=1&extratags=1&namedetails=1&q=tourism&bounded=1&viewbox=${userLocation.longitude-0.3},${userLocation.latitude+0.3},${userLocation.longitude+0.3},${userLocation.latitude-0.3}`;
+                
+                const nominatimResponse = await fetch(nominatimUrl);
+                if (nominatimResponse.ok) {
+                    const nominatimData = await nominatimResponse.json();
+                    console.log(`🌐 Nominatim retornou: ${nominatimData.length} pontos`);
+                    
+                    // Processar pontos do Nominatim
+                    const externalSpots = nominatimData.map(item => {
+                        const lat = parseFloat(item.lat);
+                        const lng = parseFloat(item.lon);
+                        
+                        // Calcular distância
                         const distance = calculateDistance(
                             userLocation.latitude,
                             userLocation.longitude,
-                            spot.localizacao.latitude,
-                            spot.localizacao.longitude
+                            lat,
+                            lng
                         );
-                        return { ...spot, distance };
-                    }
-                    return { ...spot, distance: Infinity };
-                }).sort((a, b) => a.distance - b.distance);
-
-                console.log('✅ Pontos ordenados por proximidade');
-                console.log('🏆 3 pontos mais próximos:', spots.slice(0, 3).map(s => ({ nome: s.nome, distance: s.distance?.toFixed(2) + 'km' })));
+                        
+                        return {
+                            id: `ext_${item.place_id}`,
+                            nome: item.display_name.split(',')[0] || item.name || 'Ponto Turístico',
+                            descricao: `${item.type} - 📍 ${item.display_name}`,
+                            categoria: `Turismo - ${item.type?.charAt(0)?.toUpperCase() + item.type?.slice(1) || 'Atrativo'}`,
+                            localizacao: {
+                                latitude: lat,
+                                longitude: lng
+                            },
+                            distance: distance,
+                            source: 'nominatim',
+                            importance: item.importance || 0
+                        };
+                    }).filter(spot => spot.distance <= 30); // Filtrar até 30km
+                    
+                    console.log(`🎯 Pontos externos próximos (≤30km): ${externalSpots.length}`);
+                    
+                    // Adicionar pontos externos aos locais
+                    spots = [...spots, ...externalSpots];
+                }
+            } catch (externalError) {
+                console.log('⚠️ Erro na busca externa:', externalError);
             }
+        }
 
-            console.log('📁 Total de pontos carregados do arquivo local:', spots.length);
+        // Se temos localização, calcular distâncias e filtrar/ordenar
+        if (userLocation) {
+            console.log('📐 Calculando distâncias e filtrando por proximidade...');
+            
+            spots = spots.map(spot => {
+                if (spot.localizacao) {
+                    const distance = calculateDistance(
+                        userLocation.latitude,
+                        userLocation.longitude,
+                        spot.localizacao.latitude,
+                        spot.localizacao.longitude
+                    );
+                    return { ...spot, distance };
+                }
+                return { ...spot, distance: Infinity };
+            })
+            .filter(spot => spot.distance <= 50) // FILTRAR: apenas pontos até 50km
+            .sort((a, b) => a.distance - b.distance); // ORDENAR: por proximidade
+
+            console.log(`🎯 Pontos filtrados (≤50km): ${spots.length}`);
+            
+            if (spots.length > 0) {
+                console.log('🏆 5 pontos mais próximos:', spots.slice(0, 5).map(s => ({ 
+                    nome: s.nome, 
+                    distance: s.distance?.toFixed(2) + 'km',
+                    categoria: s.categoria 
+                })));
+                
+                console.log('📊 Estatísticas dos pontos próximos:');
+                console.log('- Mais próximo:', spots[0]?.distance?.toFixed(2) + 'km');
+                console.log('- Mais distante:', spots[spots.length-1]?.distance?.toFixed(2) + 'km');
+                console.log('- Dentro de 5km:', spots.filter(s => s.distance <= 5).length);
+                console.log('- Dentro de 15km:', spots.filter(s => s.distance <= 15).length);
+                console.log('- Dentro de 30km:', spots.filter(s => s.distance <= 30).length);
+            }
+        } else {
+            console.log('❌ Sem localização - mostrando todos os pontos');
         }
 
         allSpots = spots;
-        availableSpots = [...spots]; // Inicializar com pontos locais
-        console.log('Total de pontos carregados em allSpots:', allSpots.length);
+        availableSpots = [...spots];
+        console.log(`✅ Total de pontos carregados: ${allSpots.length}`);
+        
         displayTouristSpots(spots);
         populateModalSpots(spots);
+        
+        // Mostrar mensagem sobre localização
+        if (userLocation && spots.length > 0) {
+            showNotification(`📍 Mostrando ${spots.length} pontos turísticos próximos (até 50km)`, 'success');
+        } else if (userLocation && spots.length === 0) {
+            showNotification('📍 Nenhum ponto turístico encontrado próximo à sua localização', 'warning');
+        } else if (!userLocation) {
+            showNotification('📍 Para ver pontos próximos, permita acesso à localização', 'info');
+        }
+        
     } catch (error) {
         console.error('Erro ao carregar pontos turísticos:', error);
         document.getElementById('spots-list').innerHTML = `
             <div class="empty-state">
                 <p>Erro ao carregar pontos turísticos.</p>
+                <button class="btn btn-primary" onclick="loadTouristSpots()">
+                    <i class="fas fa-redo"></i> Tentar Novamente
+                </button>
             </div>
         `;
     }
@@ -1847,38 +1913,84 @@ async function exportRoutePDF(routeId) {
         }
         const route = await routeResponse.json();
 
-        // Verificar se estamos na visualização de rota (mapa visível)
-        const routeViewModal = document.getElementById('route-view-modal');
-        const isMapVisible = routeViewModal && routeViewModal.style.display !== 'none';
+        // PRIORIDADE 1: Verificar se estamos na visualização de rota (mapa visível)
+        const routeViewModal = document.getElementById('route-details-modal');
+        const isMapVisible = routeViewModal && !routeViewModal.style.display === 'none' && routeViewModal.classList.contains('active');
         
         let mapImageData = null;
         
         if (isMapVisible) {
-            // Capturar o mapa atual da tela
-            showNotification('Capturando mapa da tela...', 'info');
+            // CAPTURAR EXATAMENTE O MAPA DA TELA
+            showNotification('📸 Capturando mapa da tela...', 'info');
             try {
-                mapImageData = await captureVisibleMap();
-                console.log('Mapa capturado com sucesso da tela');
+                const mapContainer = document.getElementById('route-detail-map');
+                if (mapContainer && typeof html2canvas !== 'undefined') {
+                    console.log('Capturando mapa visível da tela...');
+                    
+                    // Aguardar um pouco para garantir renderização
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    
+                    const canvas = await html2canvas(mapContainer, {
+                        useCORS: true,
+                        allowTaint: true,
+                        scale: 1,
+                        backgroundColor: '#ffffff',
+                        logging: false,
+                        height: mapContainer.offsetHeight,
+                        width: mapContainer.offsetWidth,
+                        foreignObjectRendering: true
+                    });
+                    
+                    mapImageData = canvas.toDataURL('image/png', 0.9);
+                    console.log('✅ Mapa da tela capturado com sucesso!');
+                } else {
+                    console.log('❌ Mapa da tela não disponível');
+                }
             } catch (error) {
-                console.log('Erro ao capturar mapa da tela, usando fallback:', error);
-                mapImageData = null;
+                console.log('❌ Erro ao capturar mapa da tela:', error);
             }
         }
 
-        // Se não conseguiu capturar da tela, criar um mapa temporário
+        // PRIORIDADE 2: Se não conseguiu capturar da tela, abrir a visualização primeiro
         if (!mapImageData) {
-            showNotification('Gerando mapa para PDF...', 'info');
-            try {
-                mapImageData = await captureRouteMap(route);
-                console.log('Mapa temporário gerado com sucesso');
-            } catch (error) {
-                console.log('Erro ao gerar mapa temporário:', error);
-                mapImageData = null;
+            showNotification('⏳ Abrindo visualização para capturar mapa...', 'info');
+            
+            // Verificar se já temos um modal aberto, se não, abrir
+            if (!routeViewModal) {
+                // Abrir a visualização
+                await viewRouteWithMap(routeId);
+                
+                // Aguardar o mapa carregar
+                await new Promise(resolve => setTimeout(resolve, 3000));
+                
+                // Tentar capturar novamente
+                const newMapContainer = document.getElementById('route-detail-map');
+                if (newMapContainer && typeof html2canvas !== 'undefined') {
+                    try {
+                        const canvas = await html2canvas(newMapContainer, {
+                            useCORS: true,
+                            allowTaint: true,
+                            scale: 1,
+                            backgroundColor: '#ffffff',
+                            logging: false
+                        });
+                        
+                        mapImageData = canvas.toDataURL('image/png', 0.9);
+                        console.log('✅ Mapa capturado após abrir visualização!');
+                        
+                        // Fechar o modal após capturar
+                        const modalToClose = document.getElementById('route-details-modal');
+                        if (modalToClose) modalToClose.remove();
+                        
+                    } catch (error) {
+                        console.log('❌ Erro ao capturar após abrir visualização:', error);
+                    }
+                }
             }
         }
 
         // Enviar para o backend
-        showNotification('Gerando PDF...', 'info');
+        showNotification('📄 Gerando PDF...', 'info');
         
         const formData = new FormData();
         formData.append('route_data', JSON.stringify(route));
@@ -1888,6 +2000,9 @@ async function exportRoutePDF(routeId) {
             const response = await fetch(mapImageData);
             const blob = await response.blob();
             formData.append('map_image', blob, 'map.png');
+            console.log('📸 Imagem do mapa adicionada ao PDF');
+        } else {
+            console.log('⚠️ Nenhuma imagem de mapa disponível, PDF será gerado sem mapa real');
         }
 
         const pdfResponse = await fetch(`${API_BASE_URL}/routes/${routeId}/export-pdf`, {
@@ -1915,7 +2030,7 @@ async function exportRoutePDF(routeId) {
             document.body.removeChild(a);
 
             setTimeout(() => window.URL.revokeObjectURL(url), 1000);
-            showNotification('PDF gerado com sucesso!', 'success');
+            showNotification('✅ PDF gerado com sucesso!', 'success');
         } else {
             const errorData = await pdfResponse.json().catch(() => ({ error: 'Erro desconhecido' }));
             throw new Error(errorData.error || 'Erro ao gerar PDF');
@@ -1942,22 +2057,27 @@ async function captureVisibleMap() {
                 return;
             }
 
-            // Capturar o mapa usando html2canvas
-            html2canvas(mapContainer, {
-                useCORS: true,
-                allowTaint: true,
-                scale: 1,
-                backgroundColor: '#ffffff',
-                logging: false,
-                height: mapContainer.offsetHeight,
-                width: mapContainer.offsetWidth
-            }).then(canvas => {
-                const imageData = canvas.toDataURL('image/png', 0.9);
-                resolve(imageData);
-            }).catch(error => {
-                console.error('Erro ao capturar mapa com html2canvas:', error);
-                reject(error);
-            });
+            // Aguardar um pouco para garantir que o mapa esteja totalmente renderizado
+            setTimeout(() => {
+                // Capturar o mapa usando html2canvas
+                html2canvas(mapContainer, {
+                    useCORS: true,
+                    allowTaint: true,
+                    scale: 1,
+                    backgroundColor: '#ffffff',
+                    logging: false,
+                    height: mapContainer.offsetHeight,
+                    width: mapContainer.offsetWidth,
+                    foreignObjectRendering: true
+                }).then(canvas => {
+                    const imageData = canvas.toDataURL('image/png', 0.9);
+                    console.log('Mapa capturado da tela com sucesso');
+                    resolve(imageData);
+                }).catch(error => {
+                    console.error('Erro ao capturar mapa com html2canvas:', error);
+                    reject(error);
+                });
+            }, 1000); // Aguardar 1 segundo para garantir renderização completa
 
         } catch (error) {
             console.error('Erro ao capturar mapa visível:', error);
@@ -1967,114 +2087,9 @@ async function captureVisibleMap() {
 }
 
 // Função para capturar imagem do mapa da rota
-async function captureRouteMap(route) {
-    return new Promise((resolve, reject) => {
-        try {
-            // Criar modal temporário e invisível para capturar o mapa
-            const tempModal = document.createElement('div');
-            tempModal.style.cssText = `
-                position: fixed;
-                top: -10000px;
-                left: -10000px;
-                width: 800px;
-                height: 600px;
-                background: white;
-                z-index: -1;
-            `;
-
-            tempModal.innerHTML = `
-                <div id="temp-map-container" style="width: 800px; height: 600px;"></div>
-            `;
-
-            document.body.appendChild(tempModal);
-
-            const mapContainer = document.getElementById('temp-map-container');
-
-            // Verificar se Leaflet está disponível
-            if (typeof L !== 'undefined') {
-                // Usar Leaflet para criar mapa real
-                const points = route.pontos_turisticos.filter(p => p.localizacao);
-
-                if (points.length === 0) {
-                    reject(new Error('Nenhum ponto com localização válida'));
-                    return;
-                }
-
-                // Calcular centro
-                let centerLat = 0, centerLng = 0;
-                points.forEach(point => {
-                    centerLat += point.localizacao.latitude;
-                    centerLng += point.localizacao.longitude;
-                });
-                centerLat /= points.length;
-                centerLng /= points.length;
-
-                // Criar mapa
-                const leafletMap = L.map(mapContainer).setView([centerLat, centerLng], 12);
-
-                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    attribution: '© OpenStreetMap contributors'
-                }).addTo(leafletMap);
-
-                // Adicionar marcadores
-                const markers = [];
-                points.forEach((point, index) => {
-                    const marker = L.marker([point.localizacao.latitude, point.localizacao.longitude])
-                        .addTo(leafletMap);
-                    markers.push(marker);
-                });
-
-                // Ajustar zoom
-                if (markers.length > 1) {
-                    const group = new L.featureGroup(markers);
-                    leafletMap.fitBounds(group.getBounds().pad(0.1));
-                }
-
-                // Capturar como imagem após renderização
-
-                setTimeout(() => {
-                    try {
-                        // Usar html2canvas se disponível, senão usar método alternativo
-                        if (typeof html2canvas !== 'undefined') {
-                            html2canvas(mapContainer, {
-                                useCORS: true,
-                                allowTaint: true,
-                                scale: 1
-                            }).then(canvas => {
-                                const imageData = canvas.toDataURL('image/png');
-                                document.body.removeChild(tempModal);
-                                resolve(imageData);
-                            }).catch(err => {
-                                document.body.removeChild(tempModal);
-                                reject(err);
-                            });
-                        } else {
-                            // Fallback: gerar mapa simples como SVG
-                            const svgMap = generateSimpleMapSVG(points);
-                            document.body.removeChild(tempModal);
-                            resolve(svgMap);
-                        }
-                    } catch (err) {
-                        document.body.removeChild(tempModal);
-                        reject(err);
-                    }
-                }, 2000);
-
-            } else {
-                // Fallback: gerar mapa simples como SVG
-                const svgMap = generateSimpleMapSVG(route.pontos_turisticos.filter(p => p.localizacao));
-                document.body.removeChild(tempModal);
-                resolve(svgMap);
-            }
-
-        } catch (error) {
-            if (document.body.contains(tempModal)) {
-                document.body.removeChild(tempModal);
-            }
-            reject(error);
-        }
-    });
-}
+// REMOVIDA - não usar mais esta função, apenas capturar da tela
+// A função captureRouteMap foi removida porque estava causando inconsistências
+// Agora usamos apenas a captura direta da tela na exportRoutePDF
 
 // Função para gerar mapa simples como SVG (fallback)
 function generateSimpleMapSVG(points) {
@@ -2117,13 +2132,35 @@ function generateSimpleMapSVG(points) {
     svg += `<rect width="${width}" height="${height}" fill="#e6f3ff"/>`;
     svg += `<text x="${width / 2}" y="30" text-anchor="middle" font-family="Arial" font-size="18" font-weight="bold">Mapa da Rota</text>`;
 
-    // Desenhar linhas conectando pontos
+    // Desenhar linhas conectando pontos (rota)
     if (points.length > 1) {
+        // Linha principal da rota
         let pathData = `M ${lngToX(points[0].localizacao.longitude)} ${latToY(points[0].localizacao.latitude)}`;
         for (let i = 1; i < points.length; i++) {
             pathData += ` L ${lngToX(points[i].localizacao.longitude)} ${latToY(points[i].localizacao.latitude)}`;
         }
-        svg += `<path d="${pathData}" stroke="#007bff" stroke-width="3" fill="none" stroke-dasharray="5,5"/>`;
+        
+        // Linha de fundo (mais grossa e clara)
+        svg += `<path d="${pathData}" stroke="#b3d9ff" stroke-width="6" fill="none"/>`;
+        // Linha principal (azul)
+        svg += `<path d="${pathData}" stroke="#007bff" stroke-width="4" fill="none"/>`;
+        
+        // Adicionar setas indicando direção
+        for (let i = 0; i < points.length - 1; i++) {
+            const x1 = lngToX(points[i].localizacao.longitude);
+            const y1 = latToY(points[i].localizacao.latitude);
+            const x2 = lngToX(points[i + 1].localizacao.longitude);
+            const y2 = latToY(points[i + 1].localizacao.latitude);
+            
+            // Calcular ponto médio e ângulo
+            const midX = (x1 + x2) / 2;
+            const midY = (y1 + y2) / 2;
+            const angle = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
+            
+            // Adicionar seta pequena
+            svg += `<polygon points="${midX-5},${midY-3} ${midX+8},${midY} ${midX-5},${midY+3}" 
+                    fill="#007bff" transform="rotate(${angle} ${midX} ${midY})"/>`;
+        }
     }
 
     // Desenhar pontos
