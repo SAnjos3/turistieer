@@ -622,102 +622,90 @@ function initRouteMap(routeData) {
         return;
     }
 
-    // Criar mapa simples com marcadores
-    const points = routeData.optimized_points;
-    const bounds = calculateBounds(points);
+    // Verificar se o Leaflet está disponível
+    if (typeof L === 'undefined') {
+        console.warn('Leaflet não disponível, usando mapa simulado');
+        initSimulatedMap(mapContainer, routeData.optimized_points, routeData);
+        return;
+    }
 
     // Limpar container
     mapContainer.innerHTML = '';
+    mapContainer.style.height = '300px'; // Garantir altura
 
-    // Criar visualização simples sem biblioteca externa
-    const mapDiv = document.createElement('div');
-    mapDiv.style.cssText = `
-        width: 100%;
-        height: 100%;
-        background: #e6f3ff;
-        position: relative;
-        border: 1px solid #ccc;
-        border-radius: 10px;
-        overflow: hidden;
-    `;
+    // Calcular centro do mapa baseado nos pontos
+    let centerLat = 0, centerLng = 0, validPoints = 0;
 
-    // Adicionar pontos como marcadores simples
-    points.forEach((point, index) => {
-        const marker = document.createElement('div');
-        marker.style.cssText = `
-            position: absolute;
-            width: 30px;
-            height: 30px;
-            background: ${index === 0 ? '#28a745' : index === points.length - 1 ? '#dc3545' : '#007bff'};
-            border: 2px solid white;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: bold;
-            font-size: 12px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
-            cursor: pointer;
-            z-index: 10;
-        `;
-
-        // Posicionar marcador (simulação)
-        const x = 50 + (index * 40) % 200;
-        const y = 50 + Math.sin(index) * 30;
-        marker.style.left = `${x}px`;
-        marker.style.top = `${y}px`;
-
-        marker.textContent = index + 1;
-        marker.title = point.nome;
-
-        mapDiv.appendChild(marker);
-
-        // Desenhar linha para o próximo ponto
-        if (index < points.length - 1) {
-            const line = document.createElement('div');
-            const nextX = 50 + ((index + 1) * 40) % 200;
-            const nextY = 50 + Math.sin(index + 1) * 30;
-
-            const length = Math.sqrt(Math.pow(nextX - x, 2) + Math.pow(nextY - y, 2));
-            const angle = Math.atan2(nextY - y, nextX - x) * 180 / Math.PI;
-
-            line.style.cssText = `
-                position: absolute;
-                width: ${length}px;
-                height: 3px;
-                background: #007bff;
-                left: ${x + 15}px;
-                top: ${y + 13.5}px;
-                transform-origin: 0 50%;
-                transform: rotate(${angle}deg);
-                z-index: 5;
-            `;
-
-            mapDiv.appendChild(line);
+    routeData.optimized_points.forEach(point => {
+        if (point.localizacao) {
+            centerLat += point.localizacao.latitude;
+            centerLng += point.localizacao.longitude;
+            validPoints++;
         }
     });
 
-    // Adicionar legenda
-    const legend = document.createElement('div');
-    legend.style.cssText = `
-        position: absolute;
-        bottom: 10px;
-        left: 10px;
-        background: rgba(255,255,255,0.9);
-        padding: 10px;
-        border-radius: 5px;
-        font-size: 12px;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-    `;
-    legend.innerHTML = `
-        <div><span style="color: #28a745;">●</span> Início</div>
-        <div><span style="color: #007bff;">●</span> Pontos Intermediários</div>
-        <div><span style="color: #dc3545;">●</span> Final</div>
-    `;
+    if (validPoints === 0) {
+        centerLat = -15.7801;
+        centerLng = -47.9292;
+    } else {
+        centerLat /= validPoints;
+        centerLng /= validPoints;
+    }
 
-    mapDiv.appendChild(legend);
-    mapContainer.appendChild(mapDiv);
+    const leafletMap = L.map(mapContainer).setView([centerLat, centerLng], 12);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors',
+        maxZoom: 18
+    }).addTo(leafletMap);
+
+    const markers = [];
+    const latLngs = [];
+
+    routeData.optimized_points.forEach((point, index) => {
+        if (point.localizacao) {
+            const lat = point.localizacao.latitude;
+            const lng = point.localizacao.longitude;
+
+            const marker = L.marker([lat, lng]).addTo(leafletMap);
+            const popupContent = `
+                <div>
+                    <h4>${point.nome}</h4>
+                    <p><strong>Posição:</strong> ${index + 1}º ponto</p>
+                    ${point.descricao ? `<p>${point.descricao}</p>` : ''}
+                    <p><strong>Coordenadas:</strong> ${lat.toFixed(6)}, ${lng.toFixed(6)}</p>
+                </div>
+            `;
+            marker.bindPopup(popupContent);
+
+            markers.push(marker);
+            latLngs.push([lat, lng]);
+        }
+    });
+
+    if (latLngs.length > 0) {
+        const group = new L.featureGroup(markers);
+        leafletMap.fitBounds(group.getBounds().pad(0.1));
+    }
+
+    if (routeData && routeData.type === 'real' && routeData.geometry) {
+        L.geoJSON(routeData.geometry, {
+            style: {
+                color: '#007bff',
+                weight: 4,
+                opacity: 0.8
+            }
+        }).addTo(leafletMap);
+    } else if (latLngs.length > 1) {
+        L.polyline(latLngs, {
+            color: '#007bff',
+            weight: 3,
+            opacity: 0.7,
+            dashArray: '5, 10'
+        }).addTo(leafletMap);
+    }
+
+    console.log('Mapa Leaflet inicializado com sucesso para preview!');
 }
 
 function initRouteDetailMap(route, routeData) {
