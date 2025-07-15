@@ -80,6 +80,12 @@ export const touristSpotService = {
     const response = await api.get(`/tourist-spots/${spotId}`);
     return response.data;
   },
+
+  // Buscar pontos turísticos externos (via OpenStreetMap/Nominatim)
+  searchExternalSpots: async (query) => {
+    const response = await api.get(`/search-places?q=${encodeURIComponent(query)}`);
+    return response.data;
+  },
 };
 
 // Serviços de Usuário
@@ -107,27 +113,85 @@ export const geolocationService = {
 
       const options = {
         enableHighAccuracy: true,
-        timeout: 5000,
-        maximumAge: 0
+        timeout: 10000, // Aumentar timeout para 10 segundos
+        maximumAge: 300000 // Cache por 5 minutos
       };
+
+      console.log('🌍 Solicitando permissão de geolocalização...');
 
       navigator.geolocation.getCurrentPosition(
         (position) => {
+          console.log('✅ Localização obtida com sucesso:', {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+            accuracy: position.coords.accuracy
+          });
+          
           resolve({
             latitude: position.coords.latitude,
             longitude: position.coords.longitude,
-            accuracy: position.coords.accuracy
+            accuracy: position.coords.accuracy,
+            timestamp: position.timestamp
           });
         },
         (error) => {
-          reject(error);
+          console.error('❌ Erro de geolocalização:', error);
+          
+          // Personalizar mensagens de erro
+          let errorMessage = 'Erro ao obter localização';
+          switch(error.code) {
+            case error.PERMISSION_DENIED:
+              errorMessage = 'Acesso à localização foi negado. Por favor, permita o acesso à sua localização.';
+              break;
+            case error.POSITION_UNAVAILABLE:
+              errorMessage = 'Localização indisponível. Verifique se o GPS está ativado.';
+              break;
+            case error.TIMEOUT:
+              errorMessage = 'Tempo limite para obter localização. Tente novamente.';
+              break;
+          }
+          
+          const customError = new Error(errorMessage);
+          customError.code = error.code;
+          reject(customError);
         },
         options
       );
     });
   },
 
-  // Observar mudanças na posição
+  // Verificar se geolocalização está disponível e com permissão
+  checkPermission: async () => {
+    if (!navigator.geolocation) {
+      throw new Error('Geolocalização não é suportada pelo navegador');
+    }
+
+    if (navigator.permissions) {
+      try {
+        const permission = await navigator.permissions.query({ name: 'geolocation' });
+        return permission.state; // 'granted', 'denied', 'prompt'
+      } catch (error) {
+        console.warn('Não foi possível verificar permissão de geolocalização:', error);
+        return 'unknown';
+      }
+    }
+    
+    return 'unknown';
+  },
+
+  // Solicitar permissão de localização (mais amigável)
+  requestLocation: async () => {
+    console.log('🌍 Verificando permissões de geolocalização...');
+    
+    const permission = await geolocationService.checkPermission();
+    console.log('📋 Status da permissão:', permission);
+    
+    if (permission === 'denied') {
+      throw new Error('Acesso à localização foi negado anteriormente. Por favor, permita o acesso nas configurações do navegador.');
+    }
+    
+    return geolocationService.getCurrentPosition();
+  },
   watchPosition: (callback, errorCallback) => {
     if (!navigator.geolocation) {
       errorCallback(new Error('Geolocalização não é suportada pelo navegador'));

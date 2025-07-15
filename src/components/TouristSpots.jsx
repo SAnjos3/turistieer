@@ -21,69 +21,136 @@ const TouristSpots = ({ setCurrentView }) => {
   const { t } = useLanguage();
 
   useEffect(() => {
-    const fetchData = async () => {
+    const initializeComponent = async () => {
+      console.log('🚀 Inicializando componente TouristSpots...');
+      
+      // Primeiro tenta obter a localização
       await getCurrentLocation();
-      await loadTouristSpots();
+      
+      // Se não conseguiu a localização, carrega pontos sem filtro
+      // (loadTouristSpots será chamado automaticamente em getCurrentLocation)
     };
-    fetchData();
+    
+    initializeComponent();
   }, []);
 
   useEffect(() => {
-    filterSpots();
+    const debounceTimer = setTimeout(() => {
+      filterSpots();
+    }, 300); // Debounce de 300ms
+
+    return () => clearTimeout(debounceTimer);
   }, [searchTerm, spots]);
 
   const getCurrentLocation = async () => {
     try {
       setLocationLoading(true);
-      console.log('Attempting to get user location...');
-      const position = await geolocationService.getCurrentPosition();
-      setUserLocation(position);
       setLocationError(null);
-      console.log('User location obtained:', position);
+      console.log('🌍 Iniciando processo de geolocalização...');
+      
+      const position = await geolocationService.requestLocation();
+      setUserLocation(position);
+      console.log('✅ Localização obtida:', position);
+      
+      // Recarregar pontos turísticos com a nova localização
+      loadTouristSpotsWithLocation(position);
+      
     } catch (err) {
+      console.error('❌ Erro ao obter localização:', err);
       setLocationError(err.message);
-      console.error('Error getting user location:', err);
+      
+      // Carregar pontos sem filtro de localização
+      loadTouristSpotsWithoutLocation();
     } finally {
       setLocationLoading(false);
-      console.log('Location loading finished.');
+      console.log('🏁 Processo de localização finalizado.');
     }
   };
 
-  const loadTouristSpots = async () => {
+  const loadTouristSpotsWithLocation = async (location) => {
     try {
       setLoading(true);
-      let data;
-      if (userLocation) {
-        data = await touristSpotService.getTouristSpots({
-          lat: userLocation.latitude,
-          lng: userLocation.longitude,
-          radius: 50 // Exemplo: busca por pontos em um raio de 50km
-        });
-      } else {
-        data = await touristSpotService.getTouristSpots();
-      }
+      console.log('🎯 Carregando pontos próximos à localização:', location);
+      
+      const data = await touristSpotService.getTouristSpots({
+        lat: location.latitude,
+        lng: location.longitude,
+        radius: 50 // Busca pontos em um raio de 50km
+      });
+      
       setSpots(data);
       setFilteredSpots(data);
+      console.log(`✅ ${data.length} pontos turísticos carregados com base na localização`);
     } catch (err) {
       setError(t('errorLoadingSpots'));
-      console.error('Error loading tourist spots:', err);
+      console.error('❌ Erro ao carregar pontos com localização:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  const filterSpots = () => {
+  const loadTouristSpotsWithoutLocation = async () => {
+    try {
+      setLoading(true);
+      console.log('📍 Carregando todos os pontos turísticos (sem filtro de localização)');
+      
+      const data = await touristSpotService.getTouristSpots();
+      setSpots(data);
+      setFilteredSpots(data);
+      console.log(`✅ ${data.length} pontos turísticos carregados`);
+    } catch (err) {
+      setError(t('errorLoadingSpots'));
+      console.error('❌ Erro ao carregar pontos:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadTouristSpots = async () => {
+    if (userLocation) {
+      await loadTouristSpotsWithLocation(userLocation);
+    } else {
+      await loadTouristSpotsWithoutLocation();
+    }
+  };
+
+  const filterSpots = async () => {
     if (!searchTerm.trim()) {
       setFilteredSpots(spots);
       return;
     }
 
-    const filtered = spots.filter(
+    // Busca local primeiro
+    const localFiltered = spots.filter(
       (spot) =>
         spot.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
         spot.descricao.toLowerCase().includes(searchTerm.toLowerCase())
     );
-    setFilteredSpots(filtered);
+
+    // Se o termo tem 3+ caracteres, buscar externamente também
+    if (searchTerm.length >= 3) {
+      try {
+        console.log('🔍 Buscando pontos externos para:', searchTerm);
+        const externalResults = await touristSpotService.searchExternalSpots(searchTerm);
+        
+        // Filtrar resultados externos para evitar duplicatas
+        const filteredExternal = externalResults.filter(extSpot => 
+          !localFiltered.some(localSpot => 
+            localSpot.nome.toLowerCase() === extSpot.nome.toLowerCase()
+          )
+        );
+
+        const combinedResults = [...localFiltered, ...filteredExternal];
+        setFilteredSpots(combinedResults);
+        console.log(`🎯 Encontrados ${localFiltered.length} locais + ${filteredExternal.length} externos`);
+      } catch (error) {
+        console.error('❌ Erro na busca externa:', error);
+        // Fallback para apenas resultados locais
+        setFilteredSpots(localFiltered);
+      }
+    } else {
+      setFilteredSpots(localFiltered);
+    }
   };
 
   const handleSpotClick = (spot) => {
@@ -110,24 +177,62 @@ const TouristSpots = ({ setCurrentView }) => {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex justify-between items-center">
-        <h2 className="text-3xl font-bold text-gray-800">
-          {t('allTouristSpots')}
-        </h2>
+        <div>
+          <h2 className="text-3xl font-bold text-gray-800">
+            {t('allTouristSpots')}
+          </h2>
+          {/* Status da localização melhorado */}
+          {userLocation && (
+            <div className="flex items-center space-x-2 mt-1">
+              <MapPin className="h-4 w-4 text-green-600" />
+              <p className="text-sm text-green-600">
+                Mostrando pontos próximos à sua localização
+              </p>
+            </div>
+          )}
+          {locationError && (
+            <div className="flex items-center space-x-2 mt-1">
+              <MapPin className="h-4 w-4 text-orange-600" />
+              <p className="text-sm text-orange-600">
+                Localização não disponível - mostrando todos os pontos
+              </p>
+              <button
+                onClick={getCurrentLocation}
+                className="text-sm text-blue-600 hover:text-blue-800 underline font-medium"
+                disabled={locationLoading}
+              >
+                {locationLoading ? '⏳ Obtendo...' : '🔄 Permitir localização'}
+              </button>
+            </div>
+          )}
+        </div>
         <Badge variant="secondary" className="text-lg px-3 py-1">
           {filteredSpots.length} pontos
         </Badge>
       </div>
 
       {/* Search */}
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-        <Input
-          type="text"
-          placeholder={t('searchSpots')}
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="pl-10"
-        />
+      <div className="space-y-2">
+        <div className="relative max-w-md">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <Input
+            type="text"
+            placeholder="Buscar pontos turísticos... (ex: Cristo Redentor, Pão de Açúcar)"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10"
+          />
+        </div>
+        {searchTerm.length >= 3 && (
+          <p className="text-xs text-gray-500 max-w-md">
+            🌐 Buscando também em fontes externas (OpenStreetMap)...
+          </p>
+        )}
+        {searchTerm.length > 0 && searchTerm.length < 3 && (
+          <p className="text-xs text-gray-400 max-w-md">
+            💡 Digite pelo menos 3 caracteres para busca externa
+          </p>
+        )}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -139,7 +244,10 @@ const TouristSpots = ({ setCurrentView }) => {
               <p className="text-gray-500">{t('noSpotsFound')}</p>
             </div>
           ) : (
-            filteredSpots.map((spot) => (
+            filteredSpots.map((spot) => {
+              const isExternal = spot.source === 'nominatim' || (spot.id && spot.id.toString().startsWith('ext_'));
+              
+              return (
               <Card
                 key={spot.id}
                 className={`cursor-pointer transition-all hover:shadow-md ${
@@ -150,7 +258,7 @@ const TouristSpots = ({ setCurrentView }) => {
                 <CardContent className="p-4">
                   <div className="flex items-start space-x-3">
                     {/* Imagem */}
-                    <div className="w-16 h-16 bg-gray-200 rounded-lg overflow-hidden flex-shrink-0">
+                    <div className="w-16 h-16 bg-gray-200 rounded-lg overflow-hidden flex-shrink-0 relative">
                       {spot.imagem_url ? (
                         <img
                           src={spot.imagem_url}
@@ -165,12 +273,25 @@ const TouristSpots = ({ setCurrentView }) => {
                           <MapPin className="h-6 w-6 text-gray-400" />
                         </div>
                       )}
+                      {/* Indicador de ponto externo */}
+                      {isExternal && (
+                        <div className="absolute top-1 right-1">
+                          <Badge variant="secondary" className="text-xs px-1 py-0">
+                            🌐
+                          </Badge>
+                        </div>
+                      )}
                     </div>
 
                     {/* Informações */}
                     <div className="flex-1 min-w-0">
-                      <h4 className="font-medium text-gray-900 mb-1 truncate">
-                        {spot.nome}
+                      <h4 className="font-medium text-gray-900 mb-1 truncate flex items-center space-x-2">
+                        <span>{spot.nome}</span>
+                        {isExternal && (
+                          <Badge variant="outline" className="text-xs">
+                            Externo
+                          </Badge>
+                        )}
                       </h4>
                       <p className="text-sm text-gray-500 line-clamp-3 mb-2">
                         {spot.descricao}
@@ -186,7 +307,8 @@ const TouristSpots = ({ setCurrentView }) => {
                   </div>
                 </CardContent>
               </Card>
-            ))
+            );
+            })
           )}
         </div>
 

@@ -6,6 +6,7 @@ let currentSection = 'routes';
 let selectedSpots = [];
 let allSpots = [];
 let allRoutes = [];
+let availableSpots = []; // Todos os pontos disponíveis (locais + externos)
 
 // Elementos DOM
 const sections = {
@@ -79,16 +80,104 @@ function setupEventListeners() {
         console.error('Elementos de busca não encontrados!');
     }
 
+    // Busca no modal
+    const modalSearchInput = document.getElementById('modal-search-spots');
+    const modalBtnSearch = document.getElementById('modal-btn-search');
+    if (modalSearchInput && modalBtnSearch) {
+        modalSearchInput.addEventListener('input', debounce(filterModalSpots, 300));
+        modalBtnSearch.addEventListener('click', filterModalSpots);
+
+        // Mostrar/ocultar dicas de busca no modal
+        modalSearchInput.addEventListener('input', function (e) {
+            updateModalSearchHints(e.target.value.length);
+        });
+
+        console.log('Event listeners do modal configurados');
+    } else {
+        console.error('Elementos de busca do modal não encontrados!');
+    }
+
     // Fechar modal clicando fora
     modal.addEventListener('click', function (e) {
         if (e.target === modal) {
             closeSpotsModal();
         }
     });
+
+    // Configurar validação de datas
+    setupDateValidation();
+}
+
+// Função para configurar validação de datas futuras
+function setupDateValidation() {
+    const startDateInput = document.getElementById('start-date');
+    const endDateInput = document.getElementById('end-date');
+    const startTimeInput = document.getElementById('start-time');
+    const endTimeInput = document.getElementById('end-time');
+
+    // Definir data mínima como hoje
+    const today = new Date().toISOString().split('T')[0];
+    startDateInput.min = today;
+    endDateInput.min = today;
+
+    // Validação quando data de início muda
+    startDateInput.addEventListener('change', function () {
+        const startDate = this.value;
+
+        // Data de fim não pode ser anterior à de início
+        endDateInput.min = startDate;
+
+        // Se data de fim já está definida e é anterior, limpar
+        if (endDateInput.value && endDateInput.value < startDate) {
+            endDateInput.value = '';
+        }
+
+        validateDateTime();
+    });
+
+    // Validação quando data de fim muda
+    endDateInput.addEventListener('change', validateDateTime);
+    startTimeInput.addEventListener('change', validateDateTime);
+    endTimeInput.addEventListener('change', validateDateTime);
+}
+
+// Função para validar data e hora
+function validateDateTime() {
+    const startDate = document.getElementById('start-date').value;
+    const endDate = document.getElementById('end-date').value;
+    const startTime = document.getElementById('start-time').value;
+    const endTime = document.getElementById('end-time').value;
+
+    if (!startDate || !startTime) return;
+
+    // Criar objetos Date para comparação
+    const startDateTime = new Date(`${startDate}T${startTime}`);
+    const now = new Date();
+
+    // Verificar se data/hora de início é futura
+    if (startDateTime <= now) {
+        showNotification('⚠️ Data e horário de início devem ser futuros!', 'warning');
+        return false;
+    }
+
+    // Se data de fim está definida, verificar ordem
+    if (endDate && endTime) {
+        const endDateTime = new Date(`${endDate}T${endTime}`);
+
+        if (endDateTime <= startDateTime) {
+            showNotification('⚠️ Data/horário de fim deve ser posterior ao início!', 'warning');
+            return false;
+        }
+    }
+
+    return true;
 }
 
 async function loadInitialData() {
     try {
+        // Tentar obter localização do usuário primeiro
+        await requestUserLocation();
+
         await Promise.all([
             loadRoutes(),
             loadTouristSpots()
@@ -96,6 +185,71 @@ async function loadInitialData() {
     } catch (error) {
         console.error('Erro ao carregar dados iniciais:', error);
         showNotification('Erro ao carregar dados iniciais', 'error');
+    }
+}
+
+// Função para solicitar localização do usuário
+async function requestUserLocation() {
+    if (isRequestingLocation) return; // Evitar múltiplas requisições
+
+    isRequestingLocation = true;
+    console.log('🌍 Solicitando localização do usuário...');
+
+    try {
+        if (!navigator.geolocation) {
+            throw new Error('Geolocalização não é suportada pelo navegador');
+        }
+
+        const position = await new Promise((resolve, reject) => {
+            const options = {
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 300000 // 5 minutos de cache
+            };
+
+            navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                    console.log('✅ Localização obtida:', pos.coords);
+                    resolve(pos);
+                },
+                (err) => {
+                    console.error('❌ Erro de geolocalização:', err);
+                    reject(err);
+                },
+                options
+            );
+        });
+
+        userLocation = {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            accuracy: position.coords.accuracy
+        };
+
+        console.log('📍 Localização obtida e armazenada:', userLocation);
+        showNotification('📍 Localização obtida! Mostrando pontos próximos.', 'success');
+        updateLocationStatus(true);
+
+    } catch (error) {
+        console.error('Erro ao obter localização:', error);
+
+        let errorMessage = 'Localização não disponível. Mostrando todos os pontos.';
+
+        // Verificar se é problema de HTTPS (desenvolvimento local)
+        if (window.location.protocol === 'http:' && window.location.hostname !== 'localhost') {
+            errorMessage = '🔒 Geolocalização requer conexão segura (HTTPS). Para desenvolvimento local, use https://localhost ou configure SSL.';
+        } else if (error.code === 1) {
+            errorMessage = 'Acesso à localização negado. Para permitir: clique no ícone de localização na barra de endereços.';
+        } else if (error.code === 2) {
+            errorMessage = 'Localização não disponível. Verifique se GPS/Wi-Fi estão ativos.';
+        } else if (error.code === 3) {
+            errorMessage = 'Tempo limite esgotado para obter localização.';
+        }
+
+        showNotification(errorMessage, 'warning');
+        updateLocationStatus(false, error.message);
+    } finally {
+        isRequestingLocation = false;
     }
 }
 
@@ -127,28 +281,68 @@ async function loadRoutes() {
 async function loadTouristSpots() {
     try {
         showLoading('spots-list');
+        console.log('🏃 Iniciando carregamento de pontos turísticos...');
+        console.log('📍 Localização disponível:', userLocation ? 'SIM' : 'NÃO');
+
+        // Construir URL da API com parâmetros de localização se disponível
+        let apiUrl = `${API_BASE_URL}/tourist-spots`;
+        if (userLocation) {
+            const params = new URLSearchParams({
+                lat: userLocation.latitude,
+                lng: userLocation.longitude,
+                radius: 50, // 50km de raio
+                category: 'tourism,attraction,historic,museum,monument,church,castle,archaeological_site,viewpoint' // Categorias turísticas
+            });
+            apiUrl += `?${params.toString()}`;
+            console.log('🎯 URL da API com localização:', apiUrl);
+        }
 
         // Primeiro tenta carregar da API
         let spots;
         try {
-            console.log('Carregando pontos turísticos da API...');
-            const response = await fetch(`${API_BASE_URL}/tourist-spots`);
+            console.log('🌐 Tentando carregar pontos da API...');
+            const response = await fetch(apiUrl);
             if (response.ok) {
                 spots = await response.json();
-                console.log('Pontos carregados da API:', spots.length);
+                console.log(`✅ Pontos carregados da API: ${spots.length}${userLocation ? ' (filtrados por localização)' : ''}`);
             } else {
+                console.log('❌ API não respondeu corretamente, status:', response.status);
                 throw new Error('API não disponível');
             }
         } catch (apiError) {
             // Se a API não funcionar, carrega do arquivo JSON local
-            console.log('API não disponível, carregando dados locais...');
+            console.log('📁 API não disponível, carregando dados locais...');
             const response = await fetch('/tourist_spots.json');
             const data = await response.json();
             spots = data.tourist_spots || data;
-            console.log('Pontos carregados do arquivo local:', spots.length);
+
+            console.log('📊 Pontos do arquivo local:', spots.length);
+
+            // Se temos localização do usuário, ordenar por proximidade
+            if (userLocation) {
+                console.log('📐 Calculando distâncias e ordenando por proximidade...');
+                spots = spots.map(spot => {
+                    if (spot.localizacao) {
+                        const distance = calculateDistance(
+                            userLocation.latitude,
+                            userLocation.longitude,
+                            spot.localizacao.latitude,
+                            spot.localizacao.longitude
+                        );
+                        return { ...spot, distance };
+                    }
+                    return { ...spot, distance: Infinity };
+                }).sort((a, b) => a.distance - b.distance);
+
+                console.log('✅ Pontos ordenados por proximidade');
+                console.log('🏆 3 pontos mais próximos:', spots.slice(0, 3).map(s => ({ nome: s.nome, distance: s.distance?.toFixed(2) + 'km' })));
+            }
+
+            console.log('📁 Total de pontos carregados do arquivo local:', spots.length);
         }
 
         allSpots = spots;
+        availableSpots = [...spots]; // Inicializar com pontos locais
         console.log('Total de pontos carregados em allSpots:', allSpots.length);
         displayTouristSpots(spots);
         populateModalSpots(spots);
@@ -202,6 +396,9 @@ function displayRoutes(routes) {
                 <button class="btn btn-small btn-view-route" onclick="viewRouteWithMap(${route.id})">
                     <i class="fas fa-map"></i> Ver Rota
                 </button>
+                <button class="btn btn-small btn-primary" onclick="editRoute(${route.id})">
+                    <i class="fas fa-edit"></i> Editar
+                </button>
                 <button class="btn btn-small btn-secondary" onclick="exportRoutePDF(${route.id})">
                     <i class="fas fa-file-pdf"></i> PDF
                 </button>
@@ -215,7 +412,8 @@ function displayRoutes(routes) {
 
 function displayTouristSpots(spots) {
     const container = document.getElementById('spots-list');
-    console.log('Exibindo pontos turísticos:', spots.length);
+    console.log('🎯 displayTouristSpots chamado com:', spots.length, 'pontos');
+    console.log('🔍 Primeiros 3 pontos:', spots.slice(0, 3));
 
     if (!spots || spots.length === 0) {
         container.innerHTML = `
@@ -240,6 +438,8 @@ function displayTouristSpots(spots) {
         // Determinar se é ponto externo
         const isExternal = spot.source === 'nominatim' || (spot.id && spot.id.toString().startsWith('ext_'));
 
+        console.log(`🖼️ Processando ponto: ${spot.nome}, imagem_url: ${spot.imagem_url ? 'SIM' : 'NÃO'}`);
+
         return `
             <div class="spot-card" data-spot-id="${spot.id}">
                 <div class="card-header">
@@ -256,16 +456,29 @@ function displayTouristSpots(spots) {
                         ${locationText}
                     </p>
                     ${spot.endereco && spot.endereco !== spot.descricao ?
-                `<p style="color: #999; font-size: 0.8rem; margin-top: 0.5rem;">${spot.endereco}</p>` : ''}
+                `<p style="color: #999; font-size: 0.8rem; margin-top: 0.5rem;"><i class="fas fa-location-arrow"></i> ${spot.endereco}</p>` : ''}
+                    ${spot.categoria && spot.categoria !== 'Turismo' ?
+                `<p style="color: #007bff; font-size: 0.8rem; margin-top: 0.5rem;"><i class="fas fa-tag"></i> ${spot.categoria}</p>` : ''}
+                    ${isExternal && spot.importance ?
+                `<p style="color: #666; font-size: 0.8rem; margin-top: 0.5rem;"><i class="fas fa-star"></i> Relevância: ${(spot.importance * 100).toFixed(1)}%</p>` : ''}
                 </div>
                 
-                ${isExternal ? `
+                ${spot.imagem_url ? `
                     <div style="margin-top: 1rem;">
-                        <button class="btn btn-small btn-primary" onclick="addExternalSpot('${spot.id}')">
-                            <i class="fas fa-plus"></i> Adicionar aos Meus Pontos
-                        </button>
+                        <img src="${spot.imagem_url}" alt="${spot.nome}" 
+                             style="width: 100%; max-height: 200px; object-fit: cover; border-radius: 8px; cursor: pointer;"
+                             onclick="openImageModal('${spot.imagem_url}', '${spot.nome}')"
+                             onerror="handleImageError(this)"
+                             title="Clique para ampliar">
                     </div>
-                ` : ''}
+                ` : `
+                    <div class="image-placeholder" style="width: 100%; height: 200px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 8px; display: flex; justify-content: center; align-items: center; color: white; margin-top: 1rem;">
+                        <div style="text-align: center;">
+                            <i class="fas fa-map-marker-alt" style="font-size: 2rem; margin-bottom: 0.5rem;"></i>
+                            <p style="margin: 0; font-size: 0.9rem;">Imagem não disponível</p>
+                        </div>
+                    </div>
+                `}
             </div>
         `;
     }).join('');
@@ -274,12 +487,43 @@ function displayTouristSpots(spots) {
 function populateModalSpots(spots) {
     const container = document.getElementById('modal-spots-list');
 
-    container.innerHTML = spots.map(spot => `
-        <div class="modal-spot-card" data-spot-id="${spot.id}" onclick="toggleSpotSelection(${spot.id})">
-            <h4>${spot.nome}</h4>
-            <p>${spot.descricao || spot.cidade || ''}</p>
-        </div>
-    `).join('');
+    if (!spots || spots.length === 0) {
+        container.innerHTML = `
+            <div style="text-align: center; padding: 2rem; color: #666;">
+                <i class="fas fa-search" style="font-size: 2rem; margin-bottom: 1rem;"></i>
+                <p>Nenhum ponto encontrado</p>
+                <p style="font-size: 0.9rem;">Tente termos diferentes</p>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = spots.map(spot => {
+        const isExternal = spot.source === 'nominatim' || (spot.id && spot.id.toString().startsWith('ext_'));
+        const isSelected = selectedSpots.some(s => s.id === spot.id);
+
+        return `
+            <div class="modal-spot-card ${isSelected ? 'selected' : ''}" 
+                 data-spot-id="${spot.id}" 
+                 onclick="toggleSpotSelection('${spot.id}')"
+                 style="position: relative;">
+                
+                ${isExternal ? '<div style="position: absolute; top: 0.5rem; right: 0.5rem; background: #3b82f6; color: white; padding: 0.2rem 0.5rem; border-radius: 0.2rem; font-size: 0.7rem;">🌐 Externo</div>' : ''}
+                
+                <h4>${spot.nome}</h4>
+                <p>${spot.descricao || spot.cidade || ''}</p>
+                
+                ${isExternal ? '<p style="font-size: 0.8rem; color: #666; margin-top: 0.5rem;"><i class="fas fa-globe"></i> OpenStreetMap</p>' : ''}
+                
+                ${isSelected ? '<div style="position: absolute; bottom: 0.5rem; right: 0.5rem; color: #10b981;"><i class="fas fa-check-circle"></i></div>' : ''}
+            </div>
+        `;
+    }).join('');
+
+    // Atualizar contador após popular os pontos
+    setTimeout(() => {
+        updateModalSpotSelection();
+    }, 100);
 }
 
 function showSection(sectionName) {
@@ -307,12 +551,25 @@ function showLoading(containerId) {
 async function handleCreateRoute(event) {
     event.preventDefault();
 
-    const formData = new FormData(event.target);
+    // Validar data e hora antes de prosseguir
+    if (!validateDateTime()) {
+        return;
+    }
+
+    const startDate = document.getElementById('start-date').value;
+    const startTime = document.getElementById('start-time').value;
+    const endDate = document.getElementById('end-date').value;
+    const endTime = document.getElementById('end-time').value;
+
+    // Combinar data e hora
+    const dataInicio = `${startDate}T${startTime}`;
+    const dataFim = endDate && endTime ? `${endDate}T${endTime}` : null;
+
     const routeData = {
         nome: document.getElementById('route-name').value,
         descricao: document.getElementById('route-description').value,
-        data_inicio: document.getElementById('start-date').value,
-        data_fim: document.getElementById('end-date').value,
+        data_inicio: dataInicio,
+        data_fim: dataFim,
         pontos_turisticos: selectedSpots.map(spot => ({
             id: spot.id,
             nome: spot.nome,
@@ -328,10 +585,7 @@ async function handleCreateRoute(event) {
             const routeCalculation = await calculateOptimalRoute(selectedSpots);
 
             if (routeCalculation) {
-                // Mostrar informações da rota
-                showRoutePreview(routeCalculation);
-
-                // Perguntar se o usuário quer usar a ordem otimizada
+                // Perguntar se o usuário quer usar a ordem otimizada (sem mostrar preview)
                 const useOptimized = confirm(
                     `Rota otimizada calculada!\n` +
                     `Distância total: ${routeCalculation.total_distance} km\n` +
@@ -376,9 +630,6 @@ async function handleCreateRoute(event) {
 
             // Mostrar rota criada
             showSection('routes');
-
-            // Mostrar detalhes da rota com mapa
-            setTimeout(() => viewRouteWithMap(newRoute.id), 500);
 
         } else {
             throw new Error('Erro ao criar rota');
@@ -556,8 +807,25 @@ function showRouteDetailsWithMap(route, routeData) {
             <div class="modal-body">
                 <div class="route-info">
                     <p><strong>Descrição:</strong> ${route.descricao || 'Não informada'}</p>
-                    <p><strong>Data:</strong> ${formatDate(route.data_inicio)} ${route.data_fim ? '- ' + formatDate(route.data_fim) : ''}</p>
+                    <p><strong>Data:</strong> ${formatDateTime(route.data_inicio)} ${route.data_fim ? '- ' + formatDateTime(route.data_fim) : ''}</p>
                     <p><strong>Total de pontos:</strong> ${(route.pontos_turisticos || []).length}</p>
+                    
+                    ${userLocation ? `
+                        <div class="user-location">
+                            <p><strong>📍 Sua localização atual:</strong></p>
+                            <p style="color: #666; font-size: 0.9rem;">
+                                Lat: ${userLocation.latitude.toFixed(6)}, Lng: ${userLocation.longitude.toFixed(6)}
+                                <span style="margin-left: 10px;">📊 Precisão: ${userLocation.accuracy?.toFixed(0)}m</span>
+                            </p>
+                        </div>
+                    ` : `
+                        <div class="user-location">
+                            <p style="color: #999; font-style: italic;">📍 Localização não disponível</p>
+                            <button onclick="requestUserLocationForRoute()" class="btn btn-small btn-secondary">
+                                <i class="fas fa-location-arrow"></i> Obter Localização
+                            </button>
+                        </div>
+                    `}
                     
                     ${routeData ? `
                         <div class="route-stats">
@@ -776,6 +1044,30 @@ function initRouteDetailMap(route, routeData) {
     const markers = [];
     const latLngs = [];
 
+    // Adicionar localização do usuário se disponível
+    if (userLocation) {
+        const userMarker = L.marker([userLocation.latitude, userLocation.longitude], {
+            icon: L.divIcon({
+                className: 'user-location-marker',
+                html: '<div style="background: #ff4757; border: 3px solid white; border-radius: 50%; width: 20px; height: 20px; box-shadow: 0 2px 6px rgba(0,0,0,0.3);"></div>',
+                iconSize: [20, 20],
+                iconAnchor: [10, 10]
+            })
+        }).addTo(leafletMap);
+
+        userMarker.bindPopup(`
+            <div>
+                <h4>📍 Sua Localização</h4>
+                <p><strong>Coordenadas:</strong> ${userLocation.latitude.toFixed(6)}, ${userLocation.longitude.toFixed(6)}</p>
+                <p><strong>Precisão:</strong> ${userLocation.accuracy?.toFixed(0)}m</p>
+                <p style="color: #666; font-size: 0.9rem;">Localização atual obtida do GPS</p>
+            </div>
+        `);
+
+        markers.push(userMarker);
+        latLngs.push([userLocation.latitude, userLocation.longitude]);
+    }
+
     points.forEach((point, index) => {
         if (point.localizacao) {
             const lat = point.localizacao.latitude;
@@ -794,6 +1086,7 @@ function initRouteDetailMap(route, routeData) {
                     <p><strong>Posição:</strong> ${index + 1}º ponto</p>
                     ${point.descricao ? `<p>${point.descricao}</p>` : ''}
                     <p><strong>Coordenadas:</strong> ${lat.toFixed(6)}, ${lng.toFixed(6)}</p>
+                    ${userLocation ? `<p><strong>Distância:</strong> ${calculateDistance(userLocation.latitude, userLocation.longitude, lat, lng).toFixed(2)} km</p>` : ''}
                 </div>
             `;
             marker.bindPopup(popupContent);
@@ -1109,6 +1402,46 @@ function formatDate(dateString) {
     return date.toLocaleDateString('pt-BR');
 }
 
+// Função para formatar data e hora
+function formatDateTime(dateTimeString) {
+    if (!dateTimeString) return '';
+
+    const date = new Date(dateTimeString);
+    const dateOptions = {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    };
+    const timeOptions = {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+    };
+
+    const formattedDate = date.toLocaleDateString('pt-BR', dateOptions);
+    const formattedTime = date.toLocaleTimeString('pt-BR', timeOptions);
+
+    return `${formattedDate} às ${formattedTime}`;
+}
+
+// Função para solicitar localização na visualização de rota
+async function requestUserLocationForRoute() {
+    try {
+        await requestUserLocation();
+        // Recarregar modal com localização atualizada
+        const modal = document.getElementById('route-details-modal');
+        if (modal) {
+            const routeId = modal.dataset.routeId;
+            if (routeId) {
+                modal.remove();
+                viewRouteWithMap(routeId);
+            }
+        }
+    } catch (error) {
+        showNotification('Erro ao obter localização', 'error');
+    }
+}
+
 function debounce(func, wait) {
     let timeout;
     return function executedFunction(...args) {
@@ -1149,44 +1482,6 @@ function debugInfo() {
     if (allSpots.length === 0) {
         console.log('Forçando recarregamento dos pontos...');
         loadTouristSpots();
-    }
-}
-
-async function addExternalSpot(spotId) {
-    try {
-        // Encontrar o ponto nas últimas buscas
-        const spotCards = document.querySelectorAll('.spot-card');
-        let spotData = null;
-
-        spotCards.forEach(card => {
-            if (card.dataset.spotId === spotId) {
-                const title = card.querySelector('.card-title').textContent;
-                const description = card.querySelector('.card-description')?.textContent || '';
-                const locationText = card.querySelector('p[style*="color: #666"]').textContent;
-
-                spotData = {
-                    nome: title,
-                    descricao: description,
-                    endereco: locationText.replace('Lat: ', '').replace('Lng: ', ''),
-                    categoria: card.querySelector('.spot-tag:not(.external-indicator)')?.textContent || 'Turismo'
-                };
-            }
-        });
-
-        if (!spotData) {
-            showNotification('Erro ao obter dados do ponto turístico', 'error');
-            return;
-        }
-
-        // Simular adição (em uma implementação real, você salvaria no backend)
-        showNotification(`"${spotData.nome}" adicionado aos seus pontos turísticos!`, 'success');
-
-        // Opcional: recarregar pontos locais
-        loadTouristSpots();
-
-    } catch (error) {
-        console.error('Erro ao adicionar ponto externo:', error);
-        showNotification('Erro ao adicionar ponto turístico', 'error');
     }
 }
 
@@ -1291,6 +1586,9 @@ function filterSpots() {
     const searchTerm = searchInput.value.toLowerCase().trim();
     console.log('Filtrando pontos com termo:', searchTerm);
 
+    // Mostrar dicas de busca
+    updateSearchHints(searchTerm.length);
+
     if (searchTerm.length < 2) {
         displayTouristSpots(allSpots);
         return;
@@ -1303,8 +1601,8 @@ function filterSpots() {
         (spot.cidade && spot.cidade.toLowerCase().includes(searchTerm))
     );
 
-    // Se há poucos resultados locais, buscar externamente
-    if (filteredSpots.length < 5) {
+    // Se termo >= 3 caracteres, sempre buscar externamente
+    if (searchTerm.length >= 3) {
         searchExternalSpots(searchTerm);
     } else {
         displayTouristSpots(filteredSpots);
@@ -1329,6 +1627,12 @@ async function searchExternalSpots(searchTerm) {
             );
 
             const combinedSpots = [...localFiltered, ...externalSpots];
+
+            // Atualizar availableSpots com todos os pontos encontrados
+            availableSpots = [...allSpots, ...externalSpots.filter(extSpot =>
+                !allSpots.some(localSpot => localSpot.id === extSpot.id)
+            )];
+
             displayTouristSpots(combinedSpots);
         } else {
             console.error('Erro na busca externa');
@@ -1352,7 +1656,15 @@ function openSpotsModal() {
     const modal = document.getElementById('spots-modal');
     if (modal) {
         modal.classList.add('active');
+        // Popular com pontos locais inicialmente
         populateModalSpots(allSpots);
+        // Atualizar contador e seleções
+        updateModalSpotSelection();
+        // Limpar busca anterior
+        const searchInput = document.getElementById('modal-search-spots');
+        if (searchInput) {
+            searchInput.value = '';
+        }
     }
 }
 
@@ -1364,17 +1676,39 @@ function closeSpotsModal() {
 }
 
 function toggleSpotSelection(spotId) {
-    const spot = allSpots.find(s => s.id == spotId);
-    if (!spot) return;
+    console.log('🎯 toggleSpotSelection chamado com ID:', spotId, 'tipo:', typeof spotId);
+
+    // Buscar primeiro em availableSpots (que inclui externos), depois em allSpots
+    let spot = availableSpots.find(s => s.id == spotId);
+    if (!spot) {
+        spot = allSpots.find(s => s.id == spotId);
+    }
+
+    if (!spot) {
+        console.error('❌ Ponto não encontrado:', spotId);
+        console.log('availableSpots:', availableSpots.map(s => s.id));
+        console.log('allSpots:', allSpots.map(s => s.id));
+        return;
+    }
+
+    console.log('✅ Ponto encontrado:', spot.nome);
 
     const index = selectedSpots.findIndex(s => s.id == spotId);
 
     if (index > -1) {
         // Remover da seleção
         selectedSpots.splice(index, 1);
+        console.log('➖ Ponto removido da seleção:', spot.nome);
     } else {
+        // Verificar limite de 5 pontos
+        if (selectedSpots.length >= 5) {
+            showNotification('Máximo de 5 pontos turísticos por rota', 'warning');
+            return;
+        }
+
         // Adicionar à seleção
         selectedSpots.push(spot);
+        console.log('➕ Ponto adicionado à seleção:', spot.nome);
     }
 
     // Atualizar visual
@@ -1394,6 +1728,12 @@ function updateModalSpotSelection() {
             card.classList.remove('selected');
         }
     });
+
+    // Atualizar contador no modal
+    const modalCounter = document.getElementById('modal-spots-counter');
+    if (modalCounter) {
+        modalCounter.textContent = `${selectedSpots.length}/5 pontos selecionados`;
+    }
 }
 
 function confirmSpotSelection() {
@@ -1411,18 +1751,62 @@ function updateSelectedSpotsDisplay() {
         return;
     }
 
-    container.innerHTML = selectedSpots.map((spot, index) => `
+    const header = `<div class="spots-counter" style="margin-bottom: 1rem; font-weight: bold; color: #333;">
+        ${selectedSpots.length}/5 pontos selecionados
+    </div>`;
+
+    const spotsHTML = selectedSpots.map((spot, index) => `
         <div class="selected-spot" data-spot-id="${spot.id}">
-            <span class="spot-order">${index + 1}</span>
-            <span class="spot-name">${spot.nome}</span>
-            <button class="btn-remove" onclick="removeSelectedSpot(${spot.id})" title="Remover">
-                <i class="fas fa-times"></i>
-            </button>
+            <div class="spot-info">
+                <span class="spot-order">${index + 1}</span>
+                <span class="spot-name">${spot.nome}</span>
+            </div>
+            <div class="spot-controls">
+                ${selectedSpots.length > 1 ? `
+                    <button class="btn-reorder" onclick="moveSpotUp(${index})" title="Mover para cima" ${index === 0 ? 'disabled' : ''}>
+                        <i class="fas fa-arrow-up"></i>
+                    </button>
+                    <button class="btn-reorder" onclick="moveSpotDown(${index})" title="Mover para baixo" ${index === selectedSpots.length - 1 ? 'disabled' : ''}>
+                        <i class="fas fa-arrow-down"></i>
+                    </button>
+                ` : ''}
+                <button class="btn-remove" onclick="removeSelectedSpot('${spot.id}')" title="Remover">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
         </div>
     `).join('');
+
+    container.innerHTML = header + spotsHTML;
+}
+
+function moveSpotUp(index) {
+    if (index <= 0) return;
+
+    // Trocar posições
+    const temp = selectedSpots[index];
+    selectedSpots[index] = selectedSpots[index - 1];
+    selectedSpots[index - 1] = temp;
+
+    updateSelectedSpotsDisplay();
+    console.log('📈 Ponto movido para cima, nova ordem:', selectedSpots.map(s => s.nome));
+}
+
+// Função para mover ponto para baixo na lista
+function moveSpotDown(index) {
+    if (index >= selectedSpots.length - 1) return;
+
+    // Trocar posições
+    const temp = selectedSpots[index];
+    selectedSpots[index] = selectedSpots[index + 1];
+    selectedSpots[index + 1] = temp;
+
+    updateSelectedSpotsDisplay();
+    console.log('📉 Ponto movido para baixo, nova ordem:', selectedSpots.map(s => s.nome));
 }
 
 function removeSelectedSpot(spotId) {
+    console.log('🗑️ removeSelectedSpot chamado com ID:', spotId, 'tipo:', typeof spotId);
     selectedSpots = selectedSpots.filter(s => s.id != spotId);
     updateSelectedSpotsDisplay();
     updateModalSpotSelection();
@@ -1451,33 +1835,748 @@ async function deleteRoute(routeId) {
     }
 }
 
-// Função para exportar PDF
+// Função para exportar PDF com captura do mapa real
 async function exportRoutePDF(routeId) {
     try {
+        showNotification('Preparando exportação PDF...', 'info');
+
+        // Buscar dados da rota
+        const routeResponse = await fetch(`${API_BASE_URL}/routes/${routeId}`);
+        if (!routeResponse.ok) {
+            throw new Error('Não foi possível carregar dados da rota');
+        }
+        const route = await routeResponse.json();
+
+        // Verificar se estamos na visualização de rota (mapa visível)
+        const routeViewModal = document.getElementById('route-view-modal');
+        const isMapVisible = routeViewModal && routeViewModal.style.display !== 'none';
+        
+        let mapImageData = null;
+        
+        if (isMapVisible) {
+            // Capturar o mapa atual da tela
+            showNotification('Capturando mapa da tela...', 'info');
+            try {
+                mapImageData = await captureVisibleMap();
+                console.log('Mapa capturado com sucesso da tela');
+            } catch (error) {
+                console.log('Erro ao capturar mapa da tela, usando fallback:', error);
+                mapImageData = null;
+            }
+        }
+
+        // Se não conseguiu capturar da tela, criar um mapa temporário
+        if (!mapImageData) {
+            showNotification('Gerando mapa para PDF...', 'info');
+            try {
+                mapImageData = await captureRouteMap(route);
+                console.log('Mapa temporário gerado com sucesso');
+            } catch (error) {
+                console.log('Erro ao gerar mapa temporário:', error);
+                mapImageData = null;
+            }
+        }
+
+        // Enviar para o backend
         showNotification('Gerando PDF...', 'info');
-
-        const response = await fetch(`${API_BASE_URL}/routes/${routeId}/pdf`);
-
-        if (response.ok) {
+        
+        const formData = new FormData();
+        formData.append('route_data', JSON.stringify(route));
+        
+        if (mapImageData && mapImageData.startsWith('data:image/')) {
+            // Converter base64 para blob
+            const response = await fetch(mapImageData);
             const blob = await response.blob();
+            formData.append('map_image', blob, 'map.png');
+        }
+
+        const pdfResponse = await fetch(`${API_BASE_URL}/routes/${routeId}/export-pdf`, {
+            method: 'POST',
+            body: formData
+        });
+
+        if (pdfResponse.ok) {
+            const blob = await pdfResponse.blob();
+
+            if (blob.size === 0) {
+                throw new Error('PDF vazio gerado');
+            }
+
+            // Download do arquivo
+            const fileName = `rota_${route.nome ? route.nome.replace(/\s+/g, '_').toLowerCase() : routeId}.pdf`;
             const url = window.URL.createObjectURL(blob);
 
             const a = document.createElement('a');
             a.href = url;
-            a.download = `rota_${routeId}.pdf`;
+            a.download = fileName;
+            a.style.display = 'none';
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
-            window.URL.revokeObjectURL(url);
 
-            showNotification('PDF baixado com sucesso!', 'success');
+            setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+            showNotification('PDF gerado com sucesso!', 'success');
         } else {
-            throw new Error('Erro ao gerar PDF');
+            const errorData = await pdfResponse.json().catch(() => ({ error: 'Erro desconhecido' }));
+            throw new Error(errorData.error || 'Erro ao gerar PDF');
         }
     } catch (error) {
         console.error('Erro ao exportar PDF:', error);
-        showNotification('Erro ao gerar PDF', 'error');
+        showNotification(`Erro ao gerar PDF: ${error.message}`, 'error');
     }
 }
 
+// Função para capturar o mapa visível na tela
+async function captureVisibleMap() {
+    return new Promise((resolve, reject) => {
+        try {
+            const mapContainer = document.getElementById('route-map');
+            if (!mapContainer) {
+                reject(new Error('Mapa não encontrado na tela'));
+                return;
+            }
+
+            // Verificar se html2canvas está disponível
+            if (typeof html2canvas === 'undefined') {
+                reject(new Error('html2canvas não disponível'));
+                return;
+            }
+
+            // Capturar o mapa usando html2canvas
+            html2canvas(mapContainer, {
+                useCORS: true,
+                allowTaint: true,
+                scale: 1,
+                backgroundColor: '#ffffff',
+                logging: false,
+                height: mapContainer.offsetHeight,
+                width: mapContainer.offsetWidth
+            }).then(canvas => {
+                const imageData = canvas.toDataURL('image/png', 0.9);
+                resolve(imageData);
+            }).catch(error => {
+                console.error('Erro ao capturar mapa com html2canvas:', error);
+                reject(error);
+            });
+
+        } catch (error) {
+            console.error('Erro ao capturar mapa visível:', error);
+            reject(error);
+        }
+    });
+}
+
+// Função para capturar imagem do mapa da rota
+async function captureRouteMap(route) {
+    return new Promise((resolve, reject) => {
+        try {
+            // Criar modal temporário e invisível para capturar o mapa
+            const tempModal = document.createElement('div');
+            tempModal.style.cssText = `
+                position: fixed;
+                top: -10000px;
+                left: -10000px;
+                width: 800px;
+                height: 600px;
+                background: white;
+                z-index: -1;
+            `;
+
+            tempModal.innerHTML = `
+                <div id="temp-map-container" style="width: 800px; height: 600px;"></div>
+            `;
+
+            document.body.appendChild(tempModal);
+
+            const mapContainer = document.getElementById('temp-map-container');
+
+            // Verificar se Leaflet está disponível
+            if (typeof L !== 'undefined') {
+                // Usar Leaflet para criar mapa real
+                const points = route.pontos_turisticos.filter(p => p.localizacao);
+
+                if (points.length === 0) {
+                    reject(new Error('Nenhum ponto com localização válida'));
+                    return;
+                }
+
+                // Calcular centro
+                let centerLat = 0, centerLng = 0;
+                points.forEach(point => {
+                    centerLat += point.localizacao.latitude;
+                    centerLng += point.localizacao.longitude;
+                });
+                centerLat /= points.length;
+                centerLng /= points.length;
+
+                // Criar mapa
+                const leafletMap = L.map(mapContainer).setView([centerLat, centerLng], 12);
+
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap contributors'
+                }).addTo(leafletMap);
+
+                // Adicionar marcadores
+                const markers = [];
+                points.forEach((point, index) => {
+                    const marker = L.marker([point.localizacao.latitude, point.localizacao.longitude])
+                        .addTo(leafletMap);
+                    markers.push(marker);
+                });
+
+                // Ajustar zoom
+                if (markers.length > 1) {
+                    const group = new L.featureGroup(markers);
+                    leafletMap.fitBounds(group.getBounds().pad(0.1));
+                }
+
+                // Capturar como imagem após renderização
+
+                setTimeout(() => {
+                    try {
+                        // Usar html2canvas se disponível, senão usar método alternativo
+                        if (typeof html2canvas !== 'undefined') {
+                            html2canvas(mapContainer, {
+                                useCORS: true,
+                                allowTaint: true,
+                                scale: 1
+                            }).then(canvas => {
+                                const imageData = canvas.toDataURL('image/png');
+                                document.body.removeChild(tempModal);
+                                resolve(imageData);
+                            }).catch(err => {
+                                document.body.removeChild(tempModal);
+                                reject(err);
+                            });
+                        } else {
+                            // Fallback: gerar mapa simples como SVG
+                            const svgMap = generateSimpleMapSVG(points);
+                            document.body.removeChild(tempModal);
+                            resolve(svgMap);
+                        }
+                    } catch (err) {
+                        document.body.removeChild(tempModal);
+                        reject(err);
+                    }
+                }, 2000);
+
+            } else {
+                // Fallback: gerar mapa simples como SVG
+                const svgMap = generateSimpleMapSVG(route.pontos_turisticos.filter(p => p.localizacao));
+                document.body.removeChild(tempModal);
+                resolve(svgMap);
+            }
+
+        } catch (error) {
+            if (document.body.contains(tempModal)) {
+                document.body.removeChild(tempModal);
+            }
+            reject(error);
+        }
+    });
+}
+
+// Função para gerar mapa simples como SVG (fallback)
+function generateSimpleMapSVG(points) {
+    if (!points || points.length === 0) {
+        return null;
+    }
+
+    const width = 800;
+    const height = 600;
+    const padding = 50;
+
+    // Calcular bounds
+    let minLat = Infinity, maxLat = -Infinity;
+    let minLng = Infinity, maxLng = -Infinity;
+
+    points.forEach(point => {
+        const lat = point.localizacao.latitude;
+        const lng = point.localizacao.longitude;
+        minLat = Math.min(minLat, lat);
+        maxLat = Math.max(maxLat, lat);
+        minLng = Math.min(minLng, lng);
+        maxLng = Math.max(maxLng, lng);
+    });
+
+    // Adicionar margem
+    const latRange = maxLat - minLat;
+    const lngRange = maxLng - minLng;
+    const margin = 0.1;
+    minLat -= latRange * margin;
+    maxLat += latRange * margin;
+    minLng -= lngRange * margin;
+    maxLng += lngRange * margin;
+
+    // Função para converter coordenadas para pixels
+    const latToY = (lat) => height - padding - ((lat - minLat) / (maxLat - minLat)) * (height - 2 * padding);
+    const lngToX = (lng) => padding + ((lng - minLng) / (maxLng - minLng)) * (width - 2 * padding);
+
+    // Gerar SVG
+    let svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">`;
+    svg += `<rect width="${width}" height="${height}" fill="#e6f3ff"/>`;
+    svg += `<text x="${width / 2}" y="30" text-anchor="middle" font-family="Arial" font-size="18" font-weight="bold">Mapa da Rota</text>`;
+
+    // Desenhar linhas conectando pontos
+    if (points.length > 1) {
+        let pathData = `M ${lngToX(points[0].localizacao.longitude)} ${latToY(points[0].localizacao.latitude)}`;
+        for (let i = 1; i < points.length; i++) {
+            pathData += ` L ${lngToX(points[i].localizacao.longitude)} ${latToY(points[i].localizacao.latitude)}`;
+        }
+        svg += `<path d="${pathData}" stroke="#007bff" stroke-width="3" fill="none" stroke-dasharray="5,5"/>`;
+    }
+
+    // Desenhar pontos
+    points.forEach((point, index) => {
+        const x = lngToX(point.localizacao.longitude);
+        const y = latToY(point.localizacao.latitude);
+
+        // Marcador
+        const color = index === 0 ? '#28a745' : (index === points.length - 1 ? '#dc3545' : '#007bff');
+        svg += `<circle cx="${x}" cy="${y}" r="12" fill="${color}" stroke="white" stroke-width="3"/>`;
+        svg += `<text x="${x}" y="${y + 5}" text-anchor="middle" font-family="Arial" font-size="12" font-weight="bold" fill="white">${index + 1}</text>`;
+
+        // Nome do ponto
+        svg += `<text x="${x}" y="${y - 20}" text-anchor="middle" font-family="Arial" font-size="10" fill="#333">${point.nome}</text>`;
+    });
+
+    svg += `</svg>`;
+
+    // Converter SVG para data URL
+    return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
+}
+
 // === FIM DAS FUNÇÕES ESSENCIAIS ===
+
+// Função para atualizar status da localização na interface
+function updateLocationStatus(hasLocation, errorMessage = '') {
+    const spotsSection = document.getElementById('spots-section');
+    if (!spotsSection) return;
+
+    // Remover status anterior se existir
+    const existingStatus = spotsSection.querySelector('.location-status');
+    if (existingStatus) {
+        existingStatus.remove();
+    }
+
+    // Criar novo status
+    const statusDiv = document.createElement('div');
+    statusDiv.className = 'location-status';
+    statusDiv.style.cssText = `
+        margin: 1rem 0;
+        padding: 0.75rem 1rem;
+        border-radius: 0.5rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.9rem;
+    `;
+
+    if (hasLocation) {
+        statusDiv.style.cssText += `
+            background-color: #d1fae5;
+            border: 1px solid #10b981;
+            color: #065f46;
+        `;
+        statusDiv.innerHTML = `
+            <i class="fas fa-map-marker-alt"></i>
+            <span>📍 Localização obtida! Mostrando pontos próximos à sua posição.</span>
+        `;
+    } else {
+        statusDiv.style.cssText += `
+            background-color: #fef3c7;
+            border: 1px solid #f59e0b;
+            color: #92400e;
+        `;
+        statusDiv.innerHTML = `
+            <i class="fas fa-exclamation-triangle"></i>
+            <span>⚠️ ${errorMessage || 'Localização não disponível'} - Mostrando todos os pontos.</span>
+            <button onclick="requestUserLocation()" style="
+                margin-left: auto;
+                padding: 0.25rem 0.75rem;
+                background: #3b82f6;
+                color: white;
+                border: none;
+                border-radius: 0.25rem;
+                cursor: pointer;
+                font-size: 0.8rem;
+            ">🔄 Permitir localização</button>
+        `;
+    }
+
+    // Inserir após o h2
+    const h2 = spotsSection.querySelector('h2');
+    if (h2) {
+        h2.insertAdjacentElement('afterend', statusDiv);
+    }
+}
+
+// Função para mostrar dicas de busca
+function updateSearchHints(searchLength) {
+    const spotsSection = document.getElementById('spots-section');
+    if (!spotsSection) return;
+
+    // Remover dicas anteriores
+    const existingHint = spotsSection.querySelector('.search-hint');
+    if (existingHint) {
+        existingHint.remove();
+    }
+
+    // Criar nova dica
+    let hintText = '';
+    let hintColor = '';
+
+    if (searchLength === 0) {
+        return; // Não mostrar dica quando campo está vazio
+    } else if (searchLength < 3) {
+        hintText = '💡 Digite pelo menos 3 caracteres para busca externa (ex: Cristo Redentor, Pão de Açúcar)';
+        hintColor = '#6b7280';
+    } else {
+        hintText = '🌐 Incluindo resultados externos do OpenStreetMap...';
+        hintColor = '#3b82f6';
+    }
+
+    const hintDiv = document.createElement('div');
+    hintDiv.className = 'search-hint';
+    hintDiv.style.cssText = `
+        margin: 0.5rem 0;
+        padding: 0.5rem 0.75rem;
+        background-color: #f9fafb;
+        border: 1px solid #e5e7eb;
+        border-radius: 0.375rem;
+        color: ${hintColor};
+        font-size: 0.875rem;
+        max-width: 32rem;
+    `;
+    hintDiv.textContent = hintText;
+
+    // Inserir após a barra de busca
+    const searchBar = spotsSection.querySelector('.search-bar');
+    if (searchBar) {
+        searchBar.insertAdjacentElement('afterend', hintDiv);
+    }
+}
+
+// Função para filtrar pontos no modal
+function filterModalSpots() {
+    const searchInput = document.getElementById('modal-search-spots');
+    if (!searchInput) return;
+
+    const searchTerm = searchInput.value.toLowerCase().trim();
+    console.log('🔍 Filtrando pontos no modal com termo:', searchTerm);
+
+    if (searchTerm.length < 2) {
+        populateModalSpots(allSpots);
+        return;
+    }
+
+    // Buscar pontos locais
+    const filteredSpots = allSpots.filter(spot =>
+        spot.nome.toLowerCase().includes(searchTerm) ||
+        (spot.descricao && spot.descricao.toLowerCase().includes(searchTerm)) ||
+        (spot.cidade && spot.cidade.toLowerCase().includes(searchTerm))
+    );
+
+    // Se termo >= 3 caracteres, buscar externamente também
+    if (searchTerm.length >= 3) {
+        searchExternalSpotsForModal(searchTerm);
+    } else {
+        populateModalSpots(filteredSpots);
+    }
+}
+
+// Função para busca externa específica do modal
+async function searchExternalSpotsForModal(searchTerm) {
+    try {
+        const container = document.getElementById('modal-spots-list');
+        container.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Buscando pontos...</div>';
+
+        console.log('🌐 Buscando pontos externos para modal:', searchTerm);
+
+        const response = await fetch(`${API_BASE_URL}/search-places?q=${encodeURIComponent(searchTerm)}`);
+
+        if (response.ok) {
+            const externalSpots = await response.json();
+            console.log('✅ Pontos externos encontrados:', externalSpots.length);
+
+            // Combinar resultados locais e externos
+            const localFiltered = allSpots.filter(spot =>
+                spot.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                (spot.descricao && spot.descricao.toLowerCase().includes(searchTerm.toLowerCase()))
+            );
+
+            // Filtrar externos para evitar duplicatas
+            const filteredExternal = externalSpots.filter(extSpot =>
+                !localFiltered.some(localSpot =>
+                    localSpot.nome.toLowerCase() === extSpot.nome.toLowerCase()
+                )
+            );
+
+            const combinedSpots = [...localFiltered, ...filteredExternal];
+
+            // Atualizar availableSpots com todos os pontos encontrados (incluindo externos)
+            const newExternalSpots = filteredExternal.filter(extSpot =>
+                !availableSpots.some(availableSpot => availableSpot.id === extSpot.id)
+            );
+            availableSpots = [...availableSpots, ...newExternalSpots];
+
+            console.log('🔄 availableSpots atualizado:');
+            console.log(`  - Total: ${availableSpots.length} pontos disponíveis`);
+            console.log(`  - Novos externos: ${newExternalSpots.length}`);
+            console.log('  - IDs externos:', newExternalSpots.map(s => s.id));
+
+            populateModalSpots(combinedSpots);
+
+            console.log(`📊 Resultado: ${localFiltered.length} locais + ${filteredExternal.length} externos`);
+        } else {
+            console.error('❌ Erro na busca externa');
+            // Fallback para resultados locais apenas
+            const filteredSpots = allSpots.filter(spot =>
+                spot.nome.toLowerCase().includes(searchTerm.toLowerCase())
+            );
+            populateModalSpots(filteredSpots);
+        }
+    } catch (error) {
+        console.error('❌ Erro na busca externa para modal:', error);
+        // Fallback para busca local
+        const filteredSpots = allSpots.filter(spot =>
+            spot.nome.toLowerCase().includes(searchTerm.toLowerCase())
+        );
+        populateModalSpots(filteredSpots);
+    }
+}
+
+// Função para mostrar dicas de busca no modal
+function updateModalSearchHints(searchLength) {
+    const hintElement = document.getElementById('modal-search-hint');
+    if (!hintElement) return;
+
+    if (searchLength === 0) {
+        hintElement.style.display = 'none';
+    } else if (searchLength < 3) {
+        hintElement.style.display = 'block';
+        hintElement.innerHTML = '💡 Digite pelo menos 3 caracteres para busca externa (OpenStreetMap)';
+        hintElement.style.color = '#6b7280';
+    } else {
+        hintElement.style.display = 'block';
+        hintElement.innerHTML = '🌐 Incluindo resultados externos...';
+        hintElement.style.color = '#3b82f6';
+    }
+}
+
+// Função para tratar erro de carregamento de imagem
+function handleImageError(img) {
+    console.log('🖼️ Erro ao carregar imagem:', img.src);
+
+    // Criar div de placeholder
+    const placeholder = document.createElement('div');
+    placeholder.className = 'image-placeholder';
+    placeholder.style.cssText = `
+        width: 100%; 
+        height: 200px; 
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+        border-radius: 8px; 
+        display: flex; 
+        justify-content: center; 
+        align-items: center; 
+        color: white; 
+        margin-top: 1rem;
+        cursor: default;
+    `;
+
+    placeholder.innerHTML = `
+        <div style="text-align: center;">
+            <i class="fas fa-image" style="font-size: 2rem; margin-bottom: 0.5rem; opacity: 0.7;"></i>
+            <p style="margin: 0; font-size: 0.9rem;">Imagem não disponível</p>
+            <p style="margin: 0; font-size: 0.7rem; opacity: 0.8;">URL: ${img.src.substring(0, 50)}...</p>
+        </div>
+    `;
+
+    // Substituir a imagem pelo placeholder
+    const container = img.parentNode;
+    if (container) {
+        container.replaceChild(placeholder, img);
+        console.log('✅ Placeholder inserido com sucesso');
+    }
+}
+
+// Função para abrir modal de imagem
+function openImageModal(imageUrl, title) {
+    const modal = document.createElement('div');
+    modal.className = 'modal active';
+
+    modal.style.zIndex = '10000';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 90vw; max-height: 90vh;">
+            <div class="modal-header">
+                <h3>${title}</h3>
+                <button class="close-modal" onclick="this.closest('.modal').remove()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body" style="text-align: center; padding: 0;">
+                <img src="${imageUrl}" alt="${title}" 
+                     style="max-width: 100%; max-height: 70vh; object-fit: contain; border-radius: 8px;">
+            </div>
+        </div>
+    `;
+
+    // Fechar modal clicando fora
+    modal.addEventListener('click', function (e) {
+        if (e.target === modal) {
+            modal.remove();
+        }
+    });
+
+    document.body.appendChild(modal);
+}
+
+// Função para editar rota
+async function editRoute(routeId) {
+    try {
+        console.log('Editando rota ID:', routeId);
+        const response = await fetch(`${API_BASE_URL}/routes/${routeId}`);
+
+        if (response.ok) {
+            const route = await response.json();
+            console.log('Rota carregada para edição:', route);
+
+            // Preencher dados da rota no formulário
+            selectedSpots = route.pontos_turisticos || [];
+
+            // Ir para a seção de criação
+            showSection('create');
+
+            // Preencher formulário
+            document.getElementById('route-name').value = route.nome || '';
+            document.getElementById('route-description').value = route.descricao || '';
+
+            if (route.data_inicio) {
+                const startDateTime = new Date(route.data_inicio);
+                const startDate = startDateTime.toISOString().split('T')[0];
+                const startTime = startDateTime.toISOString().split('T')[1].slice(0, 5);
+                document.getElementById('start-date').value = startDate;
+                document.getElementById('start-time').value = startTime;
+            }
+
+            if (route.data_fim) {
+                const endDateTime = new Date(route.data_fim);
+                const endDate = endDateTime.toISOString().split('T')[0];
+                const endTime = endDateTime.toISOString().split('T')[1].slice(0, 5);
+                document.getElementById('end-date').value = endDate;
+                document.getElementById('end-time').value = endTime;
+            }
+
+            // Atualizar display dos pontos selecionados
+            updateSelectedSpotsDisplay();
+
+            // Adicionar pontos ao availableSpots se necessário
+            selectedSpots.forEach(spot => {
+                const isExternal = spot.source === 'nominatim' || (spot.id && spot.id.toString().startsWith('ext_'));
+                if (isExternal && !availableSpots.some(s => s.id === spot.id)) {
+                    availableSpots.push(spot);
+                }
+            });
+
+            // Mudar o formulário para modo edição
+            const form = document.getElementById('create-route-form');
+            const submitBtn = form.querySelector('button[type="submit"]');
+            submitBtn.innerHTML = '<i class="fas fa-save"></i> Atualizar Rota';
+            submitBtn.onclick = function (e) {
+                e.preventDefault();
+                updateRoute(routeId);
+            };
+
+            // Adicionar botão cancelar
+            let cancelBtn = form.querySelector('.btn-cancel-edit');
+            if (!cancelBtn) {
+                cancelBtn = document.createElement('button');
+                cancelBtn.type = 'button';
+                cancelBtn.className = 'btn btn-secondary btn-cancel-edit';
+                cancelBtn.innerHTML = '<i class="fas fa-times"></i> Cancelar';
+                cancelBtn.onclick = cancelEdit;
+                submitBtn.parentNode.insertBefore(cancelBtn, submitBtn);
+            }
+
+            showNotification('Rota carregada para edição', 'info');
+        } else {
+            throw new Error('Erro ao carregar rota para edição');
+        }
+    } catch (error) {
+        console.error('Erro ao editar rota:', error);
+        showNotification('Erro ao carregar rota para edição', 'error');
+    }
+}
+
+// Função para atualizar rota
+async function updateRoute(routeId) {
+    const routeData = {
+        nome: document.getElementById('route-name').value,
+        descricao: document.getElementById('route-description').value,
+        data_inicio: document.getElementById('start-date').value,
+        data_fim: document.getElementById('end-date').value,
+        pontos_turisticos: selectedSpots.map(spot => ({
+            id: spot.id,
+            nome: spot.nome,
+            descricao: spot.descricao,
+            localizacao: spot.localizacao
+        }))
+    };
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/routes/${routeId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(routeData)
+        });
+
+        if (response.ok) {
+            showNotification('Rota atualizada com sucesso!', 'success');
+            cancelEdit();
+            loadRoutes();
+            showSection('routes');
+        } else {
+            throw new Error('Erro ao atualizar rota');
+        }
+    } catch (error) {
+        console.error('Erro ao atualizar rota:', error);
+        showNotification('Erro ao atualizar rota', 'error');
+    }
+}
+
+// Função para cancelar edição
+function cancelEdit() {
+    // Limpar formulário
+    document.getElementById('create-route-form').reset();
+    selectedSpots = [];
+    updateSelectedSpotsDisplay();
+
+    // Restaurar botão submit
+    const form = document.getElementById('create-route-form');
+    const submitBtn = form.querySelector('button[type="submit"]');
+    submitBtn.innerHTML = '<i class="fas fa-save"></i> Salvar Rota';
+    submitBtn.onclick = null;
+
+    // Remover botão cancelar
+    const cancelBtn = form.querySelector('.btn-cancel-edit');
+    if (cancelBtn) {
+        cancelBtn.remove();
+    }
+
+    showNotification('Edição cancelada', 'info');
+}
+
+// Função para calcular distância entre dois pontos (Haversine)
+function calculateDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371; // Raio da Terra em km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c; // Distância em km
+}

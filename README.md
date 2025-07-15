@@ -86,6 +86,71 @@ Sistema web para criação e gerenciamento de rotas turísticas com pontos de in
    npm start
    ```
 
+## 🧪 Testes
+
+O projeto possui uma estrutura completa de testes que valida todas as funcionalidades do MVP conforme a Definition of Done (DOD).
+
+### Estrutura de Testes
+```
+tests/
+├── conftest.py              # Configurações pytest
+├── jest.config.js          # Configuração Jest
+├── run_tests.py            # Script Python de automação
+├── run_tests.sh            # Script Bash de automação
+├── unit/                   # Testes unitários
+├── backend/                # Testes de integração backend
+├── integration/            # Testes de APIs externas
+└── components/             # Testes de componentes React
+```
+
+### Executar Testes
+
+**Opção 1: Script Automatizado (Recomendado)**
+```bash
+cd tests
+./run_tests.sh                 # Todos os testes
+./run_tests.sh --coverage      # Com relatório de cobertura
+python3 run_tests.py --all     # Via Python
+```
+
+**Opção 2: Comandos Específicos**
+
+Backend (Python):
+```bash
+cd tests
+# Testes unitários
+python3 -m pytest unit/ -v
+
+# Testes de integração  
+python3 -m pytest backend/ -v
+python3 -m pytest integration/ -v
+
+# Todos os testes backend com cobertura
+python3 -m pytest . --cov=../src --cov-report=html:../reports/backend_coverage
+```
+
+Frontend (React):
+```bash
+# Instalar dependências
+npm install
+
+# Testes de componentes
+npm run test -- tests/components/
+
+# Testes com cobertura
+npm run test:coverage
+```
+
+### Relatórios de Teste
+
+Os relatórios são gerados automaticamente na pasta `reports/`:
+
+- **Backend**: `reports/backend_coverage/index.html`
+- **Frontend**: `reports/frontend_coverage/index.html`
+- **Pytest HTML**: `reports/pytest_report.html`
+
+Consulte `tests/README.md` para documentação detalhada dos testes.
+
 ## API Endpoints
 
 ### Usuários

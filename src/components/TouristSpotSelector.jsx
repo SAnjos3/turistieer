@@ -20,7 +20,11 @@ const TouristSpotSelector = ({ onSelectSpot, onClose, selectedSpots = [] }) => {
   }, []);
 
   useEffect(() => {
-    filterSpots();
+    const debounceTimer = setTimeout(() => {
+      filterSpots();
+    }, 300); // Debounce de 300ms para evitar muitas requisições
+
+    return () => clearTimeout(debounceTimer);
   }, [searchTerm, spots]);
 
   const loadTouristSpots = async () => {
@@ -37,17 +41,42 @@ const TouristSpotSelector = ({ onSelectSpot, onClose, selectedSpots = [] }) => {
     }
   };
 
-  const filterSpots = () => {
+  const filterSpots = async () => {
     if (!searchTerm.trim()) {
       setFilteredSpots(spots);
       return;
     }
 
-    const filtered = spots.filter(spot =>
+    // Busca local primeiro
+    const localFiltered = spots.filter(spot =>
       spot.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
       spot.descricao.toLowerCase().includes(searchTerm.toLowerCase())
     );
-    setFilteredSpots(filtered);
+
+    // Se o termo de busca tem 3+ caracteres, buscar externamente também
+    if (searchTerm.length >= 3) {
+      try {
+        console.log('Buscando pontos externos para:', searchTerm);
+        const externalResults = await touristSpotService.searchExternalSpots(searchTerm);
+        
+        // Filtrar resultados externos para evitar duplicatas
+        const filteredExternal = externalResults.filter(extSpot => 
+          !localFiltered.some(localSpot => 
+            localSpot.nome.toLowerCase() === extSpot.nome.toLowerCase()
+          )
+        );
+
+        const combinedResults = [...localFiltered, ...filteredExternal];
+        setFilteredSpots(combinedResults);
+        console.log(`Encontrados ${localFiltered.length} locais + ${filteredExternal.length} externos`);
+      } catch (error) {
+        console.error('Erro na busca externa:', error);
+        // Fallback para apenas resultados locais
+        setFilteredSpots(localFiltered);
+      }
+    } else {
+      setFilteredSpots(localFiltered);
+    }
   };
 
   const isSpotSelected = (spotId) => {
@@ -73,15 +102,27 @@ const TouristSpotSelector = ({ onSelectSpot, onClose, selectedSpots = [] }) => {
 
         {/* Search */}
         <div className="p-6 border-b">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input
-              type="text"
-              placeholder={t('searchSpots')}
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10"
-            />
+          <div className="space-y-2">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Input
+                type="text"
+                placeholder="Buscar pontos turísticos para adicionar à rota..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+            {searchTerm.length >= 3 && (
+              <p className="text-xs text-gray-500">
+                🌐 Incluindo resultados externos (OpenStreetMap)
+              </p>
+            )}
+            {searchTerm.length > 0 && searchTerm.length < 3 && (
+              <p className="text-xs text-gray-400">
+                💡 Digite pelo menos 3 caracteres para busca ampliada
+              </p>
+            )}
           </div>
         </div>
 
@@ -104,6 +145,8 @@ const TouristSpotSelector = ({ onSelectSpot, onClose, selectedSpots = [] }) => {
             <div className="grid gap-4 md:grid-cols-2">
               {filteredSpots.map((spot) => {
                 const isSelected = isSpotSelected(spot.id);
+                const isExternal = spot.source === 'nominatim' || (spot.id && spot.id.toString().startsWith('ext_'));
+                
                 return (
                   <Card 
                     key={spot.id} 
@@ -115,7 +158,7 @@ const TouristSpotSelector = ({ onSelectSpot, onClose, selectedSpots = [] }) => {
                     <CardContent className="p-4">
                       <div className="flex items-start space-x-3">
                         {/* Imagem */}
-                        <div className="w-16 h-16 bg-gray-200 rounded-lg overflow-hidden flex-shrink-0">
+                        <div className="w-16 h-16 bg-gray-200 rounded-lg overflow-hidden flex-shrink-0 relative">
                           {spot.imagem_url ? (
                             <img
                               src={spot.imagem_url}
@@ -130,13 +173,26 @@ const TouristSpotSelector = ({ onSelectSpot, onClose, selectedSpots = [] }) => {
                               <MapPin className="h-6 w-6 text-gray-400" />
                             </div>
                           )}
+                          {/* Indicador de ponto externo */}
+                          {isExternal && (
+                            <div className="absolute top-1 right-1">
+                              <Badge variant="secondary" className="text-xs px-1 py-0">
+                                🌐
+                              </Badge>
+                            </div>
+                          )}
                         </div>
 
                         {/* Informações */}
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between mb-2">
-                            <h4 className="font-medium text-gray-900 truncate">
-                              {spot.nome}
+                            <h4 className="font-medium text-gray-900 truncate flex items-center space-x-2">
+                              <span>{spot.nome}</span>
+                              {isExternal && (
+                                <Badge variant="outline" className="text-xs">
+                                  Externo
+                                </Badge>
+                              )}
                             </h4>
                             {isSelected ? (
                               <Badge variant="default" className="flex items-center space-x-1">
